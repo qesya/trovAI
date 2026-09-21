@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Palette del brand TrovAI (assets/brand/README.md, .streamlit/config.toml). */
+@theme {
+  --color-wine: #681d35;
+  --color-wine-dark: #3a1020;
+  --color-wine-soft: #f3e1e3;
+  --color-peach: #ffb38a;
+  --color-peach-soft: #ffe9dc;
+  --color-cream: #fff8f3;
+  --color-blush: #f7e8e2;
+  --color-ink: #321922;
+  --color-muted: #7a5d66;
+  --color-line: #decac3;
+
+  --font-sans: var(--font-body);
+  --font-display: var(--font-heading);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+}
+
+::selection {
+  background: var(--color-peach);
+  color: var(--color-wine-dark);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-wine);
+  outline-offset: 2px;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 0.35s ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-rise {
+    animation: none;
+  }
+  html {
+    scroll-behavior: auto;
+  }
+}
