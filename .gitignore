@@ -7,3 +7,4 @@ __pycache__/
 .streamlit/secrets.toml
 shop_database.db
 *.db-journal
+.claude/
