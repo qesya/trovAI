@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trovai-pipeline"
+version = "0.1.0"
+description = "TrovAI: import, pulizia e arricchimento AI dei feed Awin"
+requires-python = ">=3.11"
+dependencies = [
+    "google-genai",
+    "pydantic>=2",
+    "psycopg[binary]",
+    "truststore",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "pre-commit"]
+
+[project.scripts]
+trovai-pipeline = "trovai_pipeline.pipeline:main"
+trovai-sync = "trovai_pipeline.awin_sync:main"
+trovai-titles = "trovai_pipeline.title_review:main"
+trovai-isolated-test = "trovai_pipeline.isolated_test:main"
+
+[tool.setuptools]
+packages = ["trovai_pipeline"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["postgres: richiede un database PostgreSQL di test (TROVAI_TEST_DATABASE_URL)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Errori reali (pyflakes) e problemi gravi di stile; niente riformattazioni di massa.
+select = ["F", "E9", "E7", "B006", "B008"]

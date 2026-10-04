@@ -3,6 +3,18 @@
 Prototipo Streamlit di assistente allo shopping basato su Gemini e un catalogo
 SQLite locale.
 
+## Struttura del repository
+
+| Cartella | Cosa contiene |
+|---|---|
+| `pipeline/` | **Nuova pipeline feed Awin**: import, pulizia, Gemini, immagini, catalogo PostgreSQL. Vedi [`pipeline/README.md`](pipeline/README.md). |
+| `web/` | Interfaccia Next.js (oggi legge `shop_database.db` SQLite; andra' collegata a PostgreSQL). |
+| radice (`awin_app5.py`, `src/`, `pages/`, `tests/`) | Prototipo Streamlit originale. |
+
+La CI (`.github/workflows/ci.yml`) esegue a ogni push i test della pipeline (con
+PostgreSQL), i test dell'app Streamlit e la ricerca di chiavi con gitleaks.
+Per bloccare le chiavi gia' al momento del commit: `pip install pre-commit && pre-commit install`.
+
 ## Configurazione locale
 
 1. Crea e attiva un ambiente virtuale Python.
