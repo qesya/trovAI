@@ -2,7 +2,7 @@ import "server-only";
 import { createHash } from "node:crypto";
 import type { CatalogRow } from "./catalog";
 import { flag, getSetting, requireSetting } from "./config";
-import { getDb } from "./db";
+import { query } from "./db";
 
 // Link Builder Awin con cache di 7 giorni nella tabella tracking_links
 // (porting di src/awin_tracking.py e resolve_product_link).
@@ -42,15 +42,15 @@ function cacheKey(advertiserId: number, destinationUrl: string, params: Record<s
   return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
-function ensureCacheTable() {
-  getDb().exec(`
+async function ensureCacheTable() {
+  await query(`
     CREATE TABLE IF NOT EXISTS tracking_links (
       cache_key TEXT PRIMARY KEY,
       advertiser_id INTEGER NOT NULL,
       destination_url TEXT NOT NULL,
       tracking_url TEXT NOT NULL,
-      parameters_json TEXT NOT NULL,
-      created_at TEXT NOT NULL
+      parameters_json JSONB NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`);
 }
 
@@ -98,15 +98,15 @@ export async function resolveProductLink(row: CatalogRow, position: number): Pro
   const params = buildClickParameters(row.id, position, config.campaign);
   const key = cacheKey(row.advertiser_id, merchantLink, params);
   try {
-    ensureCacheTable();
-    const db = getDb();
-    const cached = db
-      .prepare("SELECT tracking_url, created_at FROM tracking_links WHERE cache_key = ?")
-      .get(key) as { tracking_url: string; created_at: string } | undefined;
+    await ensureCacheTable();
+    const [cached] = await query<{ tracking_url: string; created_at: Date }>(
+      "SELECT tracking_url, created_at FROM tracking_links WHERE cache_key = ?",
+      [key],
+    );
     if (cached) {
       const age = Date.now() - new Date(cached.created_at).getTime();
       if (Number.isFinite(age) && age <= TTL_MS) return cached.tracking_url;
-      db.prepare("DELETE FROM tracking_links WHERE cache_key = ?").run(key);
+      await query("DELETE FROM tracking_links WHERE cache_key = ?", [key]);
     }
 
     const url = await generateLink(
@@ -116,12 +116,13 @@ export async function resolveProductLink(row: CatalogRow, position: number): Pro
       merchantLink,
       params,
     );
-    db.prepare(
-      `INSERT INTO tracking_links (cache_key, advertiser_id, destination_url, tracking_url,
-         parameters_json, created_at) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(cache_key) DO UPDATE SET
-         tracking_url=excluded.tracking_url, created_at=excluded.created_at`,
-    ).run(key, row.advertiser_id, merchantLink, url, JSON.stringify(params), new Date().toISOString().replace("Z", "+00:00"));
+    await query(
+      `INSERT INTO tracking_links (cache_key, advertiser_id, destination_url, tracking_url, parameters_json)
+       VALUES (?, ?, ?, ?, CAST(? AS JSONB))
+       ON CONFLICT (cache_key) DO UPDATE SET
+         tracking_url = EXCLUDED.tracking_url, created_at = CURRENT_TIMESTAMP`,
+      [key, row.advertiser_id, merchantLink, url, JSON.stringify(params)],
+    );
     return url;
   } catch (error) {
     console.error(`Impossibile generare il tracking link per advertiser ${row.advertiser_id}`, String(error));
