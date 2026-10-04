@@ -91,8 +91,9 @@ PostgreSQL dedicato, insieme a `ruff` e alla ricerca di chiavi con gitleaks.
   database esistente aggiunge solo le colonne mancanti.
 - Schema `prodotti` allineato a quello originale dell'app (`awin_db.py`):
   stesse colonne e, su un database nuovo, stessi vincoli.
-- La pipeline non dipende da Streamlit: il sito verra' rifatto in Next.js.
-  `.streamlit/secrets.toml` resta leggibile per comodita' in locale.
+- La pipeline non dipende da Streamlit; il sito e' in `web/` (Next.js) e legge
+  la vista `catalog_search`. `.streamlit/secrets.toml` resta leggibile per
+  comodita' in locale, accanto alle variabili d'ambiente.
 - Chiavi lette anche da variabili d'ambiente (necessario per CI e server).
 - Gestione quota Gemini unificata in `gemini.py`; l'import iniziale ora rispetta
   il ritmo del Free Tier e ritenta i 429.
