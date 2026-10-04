@@ -22,3 +22,5 @@ shop_database.db
 .ruff_cache/
 build/
 dist/
+# Feed demo usato da CI e sviluppo locale (dati fittizi)
+!pipeline/tests/fixtures/*.csv

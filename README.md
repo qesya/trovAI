@@ -1,129 +1,86 @@
 # TrovAI
 
-Prototipo Streamlit di assistente allo shopping basato su Gemini e un catalogo
-SQLite locale.
+Assistente allo shopping basato su Gemini: l'utente descrive cosa cerca in
+linguaggio naturale e TrovAI confronta le offerte dei negozi affiliati Awin.
 
 ## Struttura del repository
 
 | Cartella | Cosa contiene |
 |---|---|
-| `pipeline/` | **Nuova pipeline feed Awin**: import, pulizia, Gemini, immagini, catalogo PostgreSQL. Vedi [`pipeline/README.md`](pipeline/README.md). |
-| `web/` | Interfaccia Next.js (oggi legge `shop_database.db` SQLite; andra' collegata a PostgreSQL). |
-| radice (`awin_app5.py`, `src/`, `pages/`, `tests/`) | Prototipo Streamlit originale. |
+| [`pipeline/`](pipeline/README.md) | Import dei feed Awin, pulizia, arricchimento Gemini (attributi, titoli, immagini) e catalogo su **PostgreSQL**. |
+| [`web/`](web/README.md) | Sito **Next.js**: ricerca in chat, filtri, pagine legali e link affiliati. Legge il catalogo creato dalla pipeline. |
+| `docs/` | Bozze per candidature Awin e merchant. |
+| `assets/` | Logo e palette del marchio. |
 
-La CI (`.github/workflows/ci.yml`) esegue a ogni push i test della pipeline (con
-PostgreSQL), i test dell'app Streamlit e la ricerca di chiavi con gitleaks.
-Per bloccare le chiavi gia' al momento del commit: `pip install pre-commit && pre-commit install`.
-
-## Configurazione locale
-
-1. Crea e attiva un ambiente virtuale Python.
-2. Installa le dipendenze con `python -m pip install -r requirements.txt`.
-3. Imposta `GEMINI_API_KEY` nell'ambiente oppure copia
-   `.streamlit/secrets.toml.example` in `.streamlit/secrets.toml` e inserisci una
-   nuova chiave.
-4. Configura `SITE_OWNER`, `CONTACT_EMAIL` e `PRIVACY_EMAIL` con dati reali.
-5. Genera il catalogo dimostrativo con `python awin_db.py`, oppure configura
-   `DATABASE_PATH` per usare un altro database compatibile.
-6. Avvia l'app con `streamlit run awin_app5.py`.
-
-Non inserire mai credenziali reali in `.env.example`, nei file `*.example` o nel
-codice sorgente.
-
-## Test
-
-```bash
-python -m unittest discover -s tests -v
+```
+feed Awin ──> pipeline/ ──> PostgreSQL (vista catalog_search) ──> web/ ──> utente
 ```
 
-I prodotti del catalogo dimostrativo usano normali collegamenti esterni e non
-vengono presentati come tracking Awin. Solo i prodotti importati da feed Awin
-possono usare `aw_deep_link` o link creati dal Link Builder ufficiale.
+## Avvio in locale
 
-Le pagine privacy e termini descrivono il prototipo corrente e non sostituiscono
-una revisione legale basata su titolare, hosting, analytics, log e fornitori
-effettivamente utilizzati in produzione.
+1. **Database:** un PostgreSQL raggiungibile (locale o Neon/Supabase).
+2. **Pipeline:** dalla radice del repository
+   ```bash
+   python3 -m venv .venv && source .venv/bin/activate
+   pip install -e "pipeline[dev]"
+   mkdir -p .streamlit && cp pipeline/secrets.example.toml .streamlit/secrets.toml   # oppure variabili d'ambiente (.env.example)
+   trovai-sync --apply --ai-limit 50                           # importa il feed e crea le tabelle
+   ```
+   Senza feed reale puoi partire dal feed demo (dati fittizi, nessuna chiamata Gemini):
+   ```bash
+   AWIN_FEED_DOWNLOAD_URL="file://$PWD/pipeline/tests/fixtures/feed_demo.csv" trovai-sync --apply --ai-limit 0
+   ```
+3. **Sito:**
+   ```bash
+   cd web
+   cp .env.example .env.local   # Gemini, stesso PostgreSQL della pipeline, dati del sito
+   npm install
+   npm run dev                  # http://localhost:3000
+   ```
 
-## Sincronizzazione product feed Awin
+Non inserire mai credenziali reali in `.env.example`, nei file `*.example` o nel
+codice sorgente. Per bloccare le chiavi gia' al momento del commit:
+`pip install pre-commit && pre-commit install`.
 
-La sincronizzazione usa la Product Feed List di Awin e importa esclusivamente gli
-advertiser inclusi in `AWIN_ADVERTISER_IDS` che risultano `Joined` per il publisher.
-La chiave dei product feed è distinta dal token della Publisher API.
+## Controlli automatici
 
-1. Configura `AWIN_DATAFEED_API_KEY` fuori dal repository.
-2. Configura `AWIN_ADVERTISER_IDS` con una lista esplicita di ID separati da virgola.
-3. Esegui `python awin_feed_sync.py`.
+La CI (`.github/workflows/ci.yml`) esegue a ogni push e pull request:
 
-I prodotti assenti da un successivo aggiornamento dello stesso feed vengono
-marcati come non disponibili. Il catalogo creato da `awin_db.py` rimane invece una
-demo e viene identificato come tale nell'interfaccia.
+- **pipeline:** ruff e pytest, compresi i test di integrazione su PostgreSQL;
+- **sito:** lint, controllo dei tipi e build; poi avvia il sito su un database
+  riempito dalla pipeline con un feed di prova e verifica `/api/health`;
+- **segreti:** gitleaks su tutto il repository.
 
-## Link Builder e click reference
+## Link affiliati e click reference
 
-Per impostazione predefinita l'app usa il link Awin gia presente nel product feed.
-Il Link Builder API puo essere attivato dopo aver configurato:
+Per impostazione predefinita il sito usa il link Awin presente nel product feed
+(`aw_deep_link`). Il Link Builder API si attiva con `AWIN_PUBLISHER_ID`,
+`AWIN_API_TOKEN`, `AWIN_LINK_BUILDER_ENABLED=true` e, opzionalmente,
+`AWIN_TRACKING_CAMPAIGN`. I link generati restano sette giorni nella tabella
+`tracking_links`. Le click reference contengono solo ID dell'offerta e posizione
+del risultato, mai il testo della ricerca o dati personali.
 
-- `AWIN_PUBLISHER_ID`;
-- `AWIN_API_TOKEN`;
-- `AWIN_LINK_BUILDER_ENABLED=true`;
-- opzionalmente `AWIN_TRACKING_CAMPAIGN`.
-
-Il token Publisher API usa autenticazione Bearer ed e diverso dalla chiave dei
-product feed. I link generati vengono conservati per sette giorni nella tabella
-locale `tracking_links`, riducendo il numero di chiamate API. Le click reference
-contengono esclusivamente ID del prodotto e posizione del risultato; non includono
-testo della ricerca o dati personali. Se il Link Builder non e disponibile, viene
-usato l'`aw_deep_link` ufficiale del feed.
+Il feed Awin va creato includendo soltanto advertiser per cui il rapporto risulta
+`Joined`.
 
 ## Ordinamento dei risultati
 
-Gemini viene usato per trasformare il linguaggio naturale in filtri strutturati.
-Prezzi, disponibilita, esclusioni, conteggio e ordinamento vengono invece gestiti
-localmente. Il ranking assegna punti dichiarati a marca, categoria, colore,
-materiale, taglia, genere, merchant e parole chiave; l'interfaccia mostra fino a
-tre motivazioni per prodotto.
+Gemini trasforma il linguaggio naturale in filtri strutturati. Prezzi,
+disponibilita', esclusioni e ordinamento sono gestiti localmente: il ranking assegna
+punti dichiarati a marca, categoria, colore, materiale, taglia, genere, negozio e
+parole chiave, e mostra fino a tre motivazioni per prodotto. La commissione non e'
+un fattore di ranking. I testi di trasparenza sono in `web/src/lib/disclosures.ts`.
 
-Il feedback positivo o negativo salva soltanto ID del prodotto, valore del feedback
-e data. Non vengono registrati testo della ricerca o identificatori dell'utente.
-
-## Disclosure commerciale
-
-I testi pubblici relativi ad affiliazioni, ranking, ruolo dell'AI e responsabilita
-del merchant sono centralizzati in `src/disclosures.py`. La disclosure viene
-mostrata prima dei risultati e ripetuta vicino ai link affiliati. La commissione
-non e inclusa nei fattori di ranking.
-
-## Sicurezza e readiness
-
-- Le richieste sono limitate a 500 caratteri e ripulite dai caratteri di controllo.
-- Ogni sessione puo effettuare al massimo 8 ricerche in 60 secondi.
-- La cronologia inviata al modello contiene solo filtri strutturati ammessi, non il
-  messaggio originale, parole chiave libere o caratteristiche indesiderate libere.
-- Il comando `python healthcheck.py` verifica database, schema, prodotti attivi e
-  presenza delle configurazioni obbligatorie senza stampare i segreti.
-- Gli errori di download dei feed non includono URL che potrebbero contenere la
-  chiave datafeed.
-
-Il rate limiting di sessione non sostituisce un limite per IP o account applicato
-da reverse proxy, CDN o piattaforma di hosting. Prima della produzione configurare
-anche HTTPS, security header, limiti di richiesta, backup, monitoraggio, rotazione
-dei segreti e una politica documentata di conservazione dei log.
-
-## Readiness Awin
-
-`python awin_readiness.py` valuta separatamente:
-
-- `network_application_ready`: sito pubblico, identita, pagine, diritti sui
-  contenuti e catalogo funzionante;
-- `merchant_application_ready`: requisiti precedenti piu Publisher ID;
-- `merchant_launch_ready`: prodotti Awin reali, deep link completi, nessun prodotto
-  demo attivo e click di prova confermato.
-
-Il comando non invia candidature e non mostra valori di credenziali o dati
-societari. Le bozze da compilare sono nella cartella `docs/`.
+Il feedback sui risultati salva soltanto ID dell'offerta, valore e data.
 
 ## Sicurezza
 
-Una chiave Gemini era precedentemente inclusa nel prototipo. La sua rimozione dal
-file non la disattiva: deve essere revocata nel progetto Google che l'ha emessa e
-sostituita con una nuova chiave configurata fuori dal repository.
+- Richieste limitate a 500 caratteri e ripulite dai caratteri di controllo.
+- Al massimo 8 ricerche al minuto per IP (in memoria nel processo Next.js: in
+  produzione serve anche un limite a livello di proxy/CDN).
+- La cronologia inviata a Gemini contiene solo i filtri strutturati ammessi.
+- `GET /api/health` verifica configurazione, database e offerte disponibili senza
+  mostrare segreti.
+
+Le pagine privacy e termini descrivono il prototipo e non sostituiscono una
+revisione legale. Vedi anche [`PRODUCTION_CHECKLIST.md`](PRODUCTION_CHECKLIST.md).

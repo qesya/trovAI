@@ -33,8 +33,8 @@ interface Scored {
   reasons: string[];
 }
 
-function queryAndRank(filters: Filters, limit: number): Scored[] {
-  const rows = queryCatalog(filters, limit, 0);
+async function queryAndRank(filters: Filters, limit: number): Promise<Scored[]> {
+  const rows = await queryCatalog(filters, limit, 0);
   return rankProducts(rows as unknown as Record<string, unknown>[], filters).map((r) => ({
     row: rows[r.position],
     score: r.score,
@@ -71,12 +71,12 @@ export async function runSearch(
   if (Array.isArray(subQueries) && subQueries.length) {
     for (const sub of subQueries) {
       const subFilters = clean(applyManualFilters(sub, manual));
-      if (Object.keys(subFilters).length) results.push(...queryAndRank(subFilters, 15));
+      if (Object.keys(subFilters).length) results.push(...(await queryAndRank(subFilters, 15)));
     }
     appliedFilters = filtersData;
   } else {
     appliedFilters = applyManualFilters(filtersData, manual);
-    results.push(...queryAndRank(clean(appliedFilters), 30));
+    results.push(...(await queryAndRank(clean(appliedFilters), 30)));
   }
 
   // Unione: ordinamento stabile per punteggio e rimozione dei duplicati.

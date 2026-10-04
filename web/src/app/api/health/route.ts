@@ -1,5 +1,5 @@
 import { getSetting } from "@/lib/server/config";
-import { getDb } from "@/lib/server/db";
+import { query } from "@/lib/server/db";
 
 // Verifica database e configurazioni obbligatorie senza esporre i valori dei segreti.
 export async function GET() {
@@ -10,9 +10,9 @@ export async function GET() {
   };
   let productCount = 0;
   try {
-    const row = getDb()
-      .prepare("SELECT COUNT(*) AS n FROM prodotti WHERE availability = 1")
-      .get() as { n: number };
+    const [row] = await query<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM catalog_search WHERE availability = 1",
+    );
     productCount = row.n;
     checks.database_reachable = true;
     checks.active_products = productCount > 0;

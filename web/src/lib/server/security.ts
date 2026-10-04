@@ -38,7 +38,7 @@ export function sanitizeQuery(value: unknown, maxLength = 500): string {
   return cleaned;
 }
 
-// Limite in memoria per client: 8 ricerche in 60 secondi, come nella versione Streamlit.
+// Limite in memoria per client: 8 ricerche in 60 secondi.
 // Non sostituisce un limite applicato da reverse proxy, CDN o piattaforma di hosting.
 const requestLog = new Map<string, number[]>();
 

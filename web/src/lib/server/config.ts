@@ -1,9 +1,4 @@
 import "server-only";
-import path from "node:path";
-
-// Radice del progetto TrovAI (la cartella che contiene web/ e shop_database.db).
-export const PROJECT_ROOT = path.resolve(process.cwd(), "..");
-
 export class ConfigurationError extends Error {}
 
 export function getSetting(name: string, fallback?: string): string | undefined {
@@ -23,13 +18,6 @@ export function requireSetting(name: string): string {
 
 export function flag(name: string): boolean {
   return ["1", "true", "yes", "on"].includes((getSetting(name) ?? "").toLowerCase());
-}
-
-/** Percorso assoluto del database; i percorsi relativi partono dalla radice del progetto. */
-export function databasePath(): string {
-  const configured = getSetting("DATABASE_PATH");
-  if (!configured) return path.join(PROJECT_ROOT, "shop_database.db");
-  return path.isAbsolute(configured) ? configured : path.join(PROJECT_ROOT, configured);
 }
 
 export interface SiteIdentity {
