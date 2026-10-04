@@ -8,3 +8,17 @@ __pycache__/
 shop_database.db
 *.db-journal
 .claude/
+
+# --- Pipeline (pipeline/) ---
+.env.*
+!.env.example
+*.sqlite
+*.csv
+*.feed
+*.gz
+*.zip
+*.egg-info/
+.venv*/
+.ruff_cache/
+build/
+dist/
