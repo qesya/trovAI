@@ -44,17 +44,62 @@ jobs:
       - name: Test
         run: pytest -q
 
-  app-streamlit:
-    name: App Streamlit (test esistenti)
+  web:
+    name: Sito Next.js (lint, tipi, build, prova su PostgreSQL)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: trovai_web
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Stesso database per pipeline e sito, come in produzione.
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_DATABASE: trovai_web
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: test
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
-      - run: python -m unittest discover -s tests -v
+          cache-dependency-path: pipeline/pyproject.toml
+      - name: Riempie il database con il feed demo (pipeline, senza Gemini)
+        run: |
+          pip install -e pipeline
+          AWIN_FEED_DOWNLOAD_URL="file://$GITHUB_WORKSPACE/pipeline/tests/fixtures/feed_demo.csv" trovai-sync --apply --ai-limit 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Installa, lint, tipi e build
+        working-directory: web
+        run: |
+          npm ci
+          npm run lint
+          npx tsc --noEmit
+          npm run build
+      - name: Avvia il sito e verifica catalogo e ricerca
+        working-directory: web
+        run: |
+          npm run start -- -p 3000 &
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://localhost:3000/ && break; sleep 2; done
+          curl -s http://localhost:3000/api/health | tee health.json; echo
+          python3 -c "import json; d=json.load(open('health.json')); assert d['checks']['database_reachable'] and d['productCount'] == 5, d"
+          curl -s -X POST http://localhost:3000/api/search -H 'content-type: application/json' \
+            -d '{"query":"sneakers bianche","history":[]}' | tee search.json; echo
+          # Stesso modello (stesso EAN) da due negozi: e' il confronto prezzi.
+          python3 -c "import json; d=json.load(open('search.json')); assert len({p['merchant'] for p in d['products']}) == 2, d"
 
   secrets:
     name: Ricerca segreti (gitleaks)
