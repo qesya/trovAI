@@ -20,7 +20,7 @@ codice sorgente.
 ## Hosting e rete
 
 - [ ] Dominio definitivo con HTTPS valido e redirect permanente da HTTP.
-- [ ] Rate limiting per IP o account davanti a Streamlit.
+- [ ] Rate limiting per IP o account a livello di proxy/CDN (quello del sito Next.js vive in memoria).
 - [ ] Limite alla dimensione delle richieste e timeout a livello di proxy.
 - [ ] Security header verificati: CSP, HSTS, X-Content-Type-Options e frame policy.
 - [ ] Accesso amministrativo e deploy protetti con autenticazione forte.
@@ -36,8 +36,8 @@ codice sorgente.
 
 ## Verifica finale
 
-- [ ] `python -m unittest discover -s tests -v` passa.
-- [ ] `python healthcheck.py` restituisce `"ready": true`.
+- [ ] La CI e' verde sul commit pubblicato (pipeline, sito, gitleaks).
+- [ ] `GET /api/health` del sito pubblicato restituisce `"ok": true`.
 - [ ] Un click reale appare nel reporting Awin con i click reference attesi.
 - [ ] Prezzo e disponibilita sono coerenti tra TrovAI e pagina del merchant.
 - [ ] Cancellazione sessione, pagine legali e contatti funzionano da mobile.
