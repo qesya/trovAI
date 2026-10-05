@@ -16,7 +16,7 @@ from google.genai import types
 # Incrementare questa versione fa riesaminare la semantica del prodotto quando
 # il feed viene risincronizzato: una correzione delle regole non deve restare
 # nascosta nella cache di arricchimento Gemini.
-NORMALIZATION_VERSION = "2026-10-04"
+NORMALIZATION_VERSION = "2026-10-05"
 PRODUCT_TYPES = {"abbigliamento", "scarpe", "accessori", "altro"}
 MARKETING_PHRASES = (
     "spedizione gratuita", "spedizione gratis", "best seller", "best-seller",
@@ -334,10 +334,34 @@ class CleanProduct:
     currency: str
     content_hash: str
     data_quality: str
+    # Offerta gia' presente nel database (impostata dal confronto incrementale).
+    offer_id: Optional[int] = None
+    # Impronta operativa calcolata sui valori del feed, prima di cache/IA: una
+    # taglia completata dall'IA non deve far sembrare "cambiato" il prodotto.
+    feed_operational_hash: str = ""
 
     @property
     def merchant_product_id(self) -> str:
         return self.ean or self.source_product_id
+
+    @property
+    def operational_hash(self) -> str:
+        """Impronta dei campi operativi del feed: si aggiornano direttamente, senza IA."""
+        return self.feed_operational_hash or self._operational_values_hash()
+
+    def _operational_values_hash(self) -> str:
+        values = (
+            f"{self.price:.2f}",
+            f"{self.sale_price:.2f}" if self.sale_price is not None else "",
+            self.size or "",
+            self.ean or "",
+            self.currency,
+            self.advertiser_name,
+            self.merchant_deep_link or "",
+            self.aw_deep_link or "",
+            self.image_link or "",
+        )
+        return hashlib.sha256("|".join(values).encode("utf-8")).hexdigest()
 
     @property
     def needs_ai(self) -> bool:
@@ -382,7 +406,9 @@ class CleanProduct:
             elif field == "age_group":
                 value = _known_canonical_value(value, _AGE_GROUP_RULES)
             elif field == "size":
-                value = _normalize_size(value)
+                # La taglia e' un dato operativo del feed: l'IA la completa solo
+                # se manca, cosi' una risposta in cache non la sovrascrive.
+                value = None if self.size else _normalize_size(value)
             elif field == "model_match_confidence":
                 value = value if value in {"high", "low"} else None
             elif field == "product_type":
@@ -477,22 +503,32 @@ def clean_row(row: Mapping[str, Any]) -> Optional[CleanProduct]:
         return None
     discount_percentage = round((regular_price - sale_price) / regular_price * 100, 2) if regular_price and sale_price else None
     mpn = _valid_mpn(_coalesce_text(row, "mpn", "model", "manufacturer_part_number"))
-    # Prezzo e disponibilita non entrano qui: possono cambiare spesso senza richiedere IA.
-    # Gli attributi semantici invece invalidano la cache quando il merchant li modifica.
+    # Impronta dei contenuti usati dall'IA. Prezzo, disponibilita' e taglie
+    # disponibili NON entrano qui: cambiano spesso e vanno aggiornati senza IA
+    # (vedi CleanProduct.operational_hash). Gli attributi testuali invece
+    # invalidano la cache quando il merchant li modifica.
     semantic_values = (
         NORMALIZATION_VERSION, raw_title, searchable_description, _normalize_brand(_coalesce_text(row, "brand", "brand_name")), source_category,
-        normalized_text(_coalesce_text(row, "size", "sizes", "available_sizes", "taglia")),
         normalized_text(_coalesce_text(row, "color", "colour")),
         normalized_text(_coalesce_text(row, "material", "fabric")),
         normalized_text(_coalesce_text(row, "gender", "sex")),
     )
     content_hash = hashlib.sha256("|".join(filter(None, semantic_values)).encode("utf-8")).hexdigest()
-    return CleanProduct(source_product_id=str(source_product_id), advertiser_id=advertiser_id, advertiser_name=normalized_text(_coalesce_text(row, "advertiser_name", "merchant_name")) or "awin", ean=_valid_ean(_coalesce_text(row, "gtin", "ean")), title=title, source_title=raw_title, clean_title=clean_title(title), description=description, brand=_normalize_brand(_coalesce_text(row, "brand", "brand_name")), product_type=product_type, sottocategoria=subcategory, gender=gender, age_group=age_group, color=color, size=size, material=material, price=price, sale_price=sale_price, discount_percentage=discount_percentage, extracted_model=_extract_model(title, mpn), model_title=None, colorway_name=None, model_match_confidence=None, merchant_deep_link=merchant_deep_link, aw_deep_link=aw_deep_link, image_link=_coalesce_text(row, "image_link", "aw_image_url", "merchant_image_url"), currency=(normalized_text(_coalesce_text(row, "currency")) or "eur").upper(), content_hash=content_hash, data_quality="rules" if product_type and subcategory else "partial")
+    product = CleanProduct(source_product_id=str(source_product_id), advertiser_id=advertiser_id, advertiser_name=normalized_text(_coalesce_text(row, "advertiser_name", "merchant_name")) or "awin", ean=_valid_ean(_coalesce_text(row, "gtin", "ean")), title=title, source_title=raw_title, clean_title=clean_title(title), description=description, brand=_normalize_brand(_coalesce_text(row, "brand", "brand_name")), product_type=product_type, sottocategoria=subcategory, gender=gender, age_group=age_group, color=color, size=size, material=material, price=price, sale_price=sale_price, discount_percentage=discount_percentage, extracted_model=_extract_model(title, mpn), model_title=None, colorway_name=None, model_match_confidence=None, merchant_deep_link=merchant_deep_link, aw_deep_link=aw_deep_link, image_link=_coalesce_text(row, "image_link", "aw_image_url", "merchant_image_url"), currency=(normalized_text(_coalesce_text(row, "currency")) or "eur").upper(), content_hash=content_hash, data_quality="rules" if product_type and subcategory else "partial")
+    product.feed_operational_hash = product._operational_values_hash()
+    return product
 
 
-def enrich_with_gemini(products: list[CleanProduct], api_key: str, model: str) -> dict[str, dict[str, Optional[str]]]:
+class EnrichmentBatch(dict):
+    """Risultato di un blocco Gemini (hash -> campi) con i token consumati."""
+
+    prompt_tokens: int = 0
+    output_tokens: int = 0
+
+
+def enrich_with_gemini(products: list[CleanProduct], api_key: str, model: str) -> EnrichmentBatch:
     if not products:
-        return {}
+        return EnrichmentBatch()
     client = genai.Client(api_key=api_key)
     payload = [
         {
@@ -584,7 +620,7 @@ Regole fondamentali:
     if not isinstance(parsed, list):
         raise ValueError("Gemini ha restituito un JSON che non e' una lista di prodotti.")
     allowed = {item.content_hash for item in products}
-    return {
+    result = EnrichmentBatch({
         str(item["hash"]): {
             field: normalized_text(item.get(field))
             for field in (
@@ -603,4 +639,8 @@ Regole fondamentali:
         }
         for item in parsed
         if isinstance(item, dict) and item.get("hash") in allowed
-    }
+    })
+    usage = getattr(response, "usage_metadata", None)
+    result.prompt_tokens = int(getattr(usage, "prompt_token_count", 0) or 0)
+    result.output_tokens = int(getattr(usage, "candidates_token_count", 0) or 0)
+    return result

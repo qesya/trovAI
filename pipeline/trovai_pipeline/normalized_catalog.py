@@ -102,6 +102,18 @@ def ensure_normalized_schema(conn) -> None:
         )
     """)
     conn.execute("ALTER TABLE merchant_offers ADD COLUMN IF NOT EXISTS last_seen_run TEXT")
+    # Aggiornamento incrementale: EAN dell'offerta, impronta dei campi operativi
+    # e storico della disponibilita' (le offerte non si cancellano mai).
+    conn.execute("ALTER TABLE merchant_offers ADD COLUMN IF NOT EXISTS ean TEXT")
+    conn.execute("ALTER TABLE merchant_offers ADD COLUMN IF NOT EXISTS operational_hash TEXT")
+    conn.execute("ALTER TABLE merchant_offers ADD COLUMN IF NOT EXISTS first_seen_at TIMESTAMPTZ")
+    conn.execute("ALTER TABLE merchant_offers ADD COLUMN IF NOT EXISTS unavailable_since TIMESTAMPTZ")
+    conn.execute("CREATE INDEX IF NOT EXISTS merchant_offers_ean_idx ON merchant_offers(advertiser_id, ean) WHERE ean IS NOT NULL")
+    conn.execute("""
+        UPDATE merchant_offers AS offers SET ean = variants.ean
+        FROM product_variants AS variants
+        WHERE variants.id = offers.variant_id AND offers.ean IS NULL AND variants.ean IS NOT NULL
+    """)
     conn.execute("CREATE INDEX IF NOT EXISTS merchant_offers_variant_idx ON merchant_offers(variant_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS merchant_offers_active_idx ON merchant_offers(availability, price)")
     conn.execute("CREATE INDEX IF NOT EXISTS product_color_variants_product_idx ON product_color_variants(product_id)")
@@ -244,14 +256,19 @@ def _upsert_product(conn, product: CleanProduct) -> int:
             model_match_confidence, match_method, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'merchant_title', ?)
         ON CONFLICT(product_key) DO UPDATE SET
-            brand=excluded.brand, canonical_title=excluded.canonical_title,
+            -- Un valore vuoto non cancella mai un arricchimento gia' salvato.
+            brand=COALESCE(excluded.brand, catalog_products.brand),
+            canonical_title=excluded.canonical_title,
             source_title=excluded.source_title,
-            clean_title=excluded.clean_title, description=excluded.description,
-            product_type=excluded.product_type,
-            sottocategoria=excluded.sottocategoria, gender=excluded.gender,
-            age_group=excluded.age_group, model_code=excluded.model_code,
-            model_title=excluded.model_title,
-            model_match_confidence=excluded.model_match_confidence,
+            clean_title=excluded.clean_title,
+            description=COALESCE(excluded.description, catalog_products.description),
+            product_type=COALESCE(excluded.product_type, catalog_products.product_type),
+            sottocategoria=COALESCE(excluded.sottocategoria, catalog_products.sottocategoria),
+            gender=COALESCE(excluded.gender, catalog_products.gender),
+            age_group=COALESCE(excluded.age_group, catalog_products.age_group),
+            model_code=COALESCE(excluded.model_code, catalog_products.model_code),
+            model_title=COALESCE(excluded.model_title, catalog_products.model_title),
+            model_match_confidence=COALESCE(excluded.model_match_confidence, catalog_products.model_match_confidence),
             updated_at=excluded.updated_at
         RETURNING id
     """, (
@@ -277,7 +294,8 @@ def _upsert_color_variant(conn, product_id: int, product: CleanProduct) -> int:
             model_code, image_link, updated_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(color_variant_key) DO UPDATE SET
-            color_label=excluded.color_label, colorway_title=excluded.colorway_title,
+            color_label=COALESCE(excluded.color_label, product_color_variants.color_label),
+            colorway_title=excluded.colorway_title,
             model_code=excluded.model_code, image_link=excluded.image_link,
             updated_at=excluded.updated_at
         RETURNING id
@@ -299,8 +317,10 @@ def _upsert_variant(conn, product_id: int, color_variant_id: int, product: Clean
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(variant_key) DO UPDATE SET
             product_id=excluded.product_id, color_variant_id=excluded.color_variant_id,
-            ean=excluded.ean, size=excluded.size,
-            color=excluded.color, material=excluded.material,
+            ean=COALESCE(excluded.ean, product_variants.ean),
+            size=COALESCE(excluded.size, product_variants.size),
+            color=COALESCE(excluded.color, product_variants.color),
+            material=COALESCE(excluded.material, product_variants.material),
             enrichment_quality=excluded.enrichment_quality, updated_at=excluded.updated_at
         RETURNING id
     """, (
@@ -310,43 +330,117 @@ def _upsert_variant(conn, product_id: int, color_variant_id: int, product: Clean
     return row[0]
 
 
+def attach_ean_to_variant(conn, offer_id: int, ean: str | None) -> None:
+    """Un EAN comparso dopo non crea un nuovo prodotto: completa la variante esistente.
+
+    Si aggiorna solo se la variante dell'offerta non ha ancora un EAN e se nessun
+    altra variante lo usa gia' (in quel caso ci pensa la normale unione per EAN).
+    """
+    if not ean:
+        return
+    conn.execute("""
+        UPDATE product_variants AS variants
+        SET ean = ?, variant_key = 'ean:' || ?, updated_at = CURRENT_TIMESTAMP
+        FROM merchant_offers AS offers
+        WHERE offers.id = ? AND variants.id = offers.variant_id AND variants.ean IS NULL
+          AND NOT EXISTS (SELECT 1 FROM product_variants AS other WHERE other.ean = ?)
+    """, (ean, ean, offer_id, ean))
+
+
+_OFFER_FIELDS = """
+    variant_id, advertiser_id, advertiser_name, source_product_id, ean,
+    merchant_deep_link, aw_deep_link, image_link, price, sale_price,
+    currency, availability, semantic_hash, operational_hash,
+    first_seen_at, last_seen_at, last_seen_run, unavailable_since
+"""
+
+
 def upsert_normalized_catalog(conn, products: Iterable[CleanProduct], run_id: str | None = None) -> None:
-    """Mantiene le offerte separate e aggiorna prezzo/disponibilita senza IA."""
+    """Scrive prodotto, colorazione, variante e offerta (offerte separate per negozio).
+
+    Se il confronto incrementale ha gia' trovato l'offerta (``product.offer_id``)
+    la aggiorna per ID: cosi' un EAN aggiunto dopo, o una riga tecnica duplicata
+    con lo stesso EAN, non generano offerte doppie.
+    """
     now = datetime.now(timezone.utc)
     for product in products:
+        if product.offer_id is not None:
+            attach_ean_to_variant(conn, product.offer_id, product.ean)
         product_id = _upsert_product(conn, product)
         color_variant_id = _upsert_color_variant(conn, product_id, product)
         variant_id = _upsert_variant(conn, product_id, color_variant_id, product)
-        conn.execute("""
-            INSERT INTO merchant_offers (
-                variant_id, advertiser_id, advertiser_name, source_product_id,
-                merchant_deep_link, aw_deep_link, image_link, price, sale_price,
-                currency, availability, semantic_hash, last_seen_at, last_seen_run
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?, ?)
+        values = (
+            variant_id, product.advertiser_name, product.ean, product.merchant_deep_link,
+            product.aw_deep_link, product.image_link, product.price, product.sale_price,
+            product.currency, product.content_hash, product.operational_hash, now, run_id,
+        )
+        if product.offer_id is not None:
+            conn.execute("""
+                UPDATE merchant_offers SET
+                    variant_id = ?, advertiser_name = ?, ean = COALESCE(?, ean),
+                    merchant_deep_link = ?, aw_deep_link = ?, image_link = ?,
+                    price = ?, sale_price = ?, currency = ?, availability = TRUE,
+                    semantic_hash = ?, operational_hash = ?, last_seen_at = ?,
+                    last_seen_run = ?, unavailable_since = NULL
+                WHERE id = ?
+            """, values + (product.offer_id,))
+            continue
+        conn.execute(f"""
+            INSERT INTO merchant_offers ({_OFFER_FIELDS})
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE, ?, ?, ?, ?, ?, NULL)
             ON CONFLICT(advertiser_id, source_product_id) DO UPDATE SET
                 variant_id=excluded.variant_id, advertiser_name=excluded.advertiser_name,
+                ean=COALESCE(excluded.ean, merchant_offers.ean),
                 merchant_deep_link=excluded.merchant_deep_link, aw_deep_link=excluded.aw_deep_link,
                 image_link=excluded.image_link, price=excluded.price,
                 sale_price=excluded.sale_price, currency=excluded.currency,
-                availability=excluded.availability, semantic_hash=excluded.semantic_hash,
-                last_seen_at=excluded.last_seen_at, last_seen_run=excluded.last_seen_run
+                availability=TRUE, semantic_hash=excluded.semantic_hash,
+                operational_hash=excluded.operational_hash,
+                last_seen_at=excluded.last_seen_at, last_seen_run=excluded.last_seen_run,
+                unavailable_since=NULL
         """, (
-            variant_id, product.advertiser_id, product.advertiser_name,
-            product.source_product_id, product.merchant_deep_link, product.aw_deep_link,
-            product.image_link, product.price, product.sale_price, product.currency,
-            product.content_hash, now, run_id,
+            variant_id, product.advertiser_id, product.advertiser_name, product.source_product_id,
+            product.ean, product.merchant_deep_link, product.aw_deep_link, product.image_link,
+            product.price, product.sale_price, product.currency, product.content_hash,
+            product.operational_hash, now, now, run_id,
         ))
 
 
-def mark_offer_unavailable(conn, advertiser_id: int, source_product_id: str) -> None:
-    conn.execute(
-        "UPDATE merchant_offers SET availability = FALSE WHERE advertiser_id = ? AND source_product_id = ?",
-        (advertiser_id, source_product_id),
-    )
+def mark_offer_unavailable(conn, advertiser_id: int, source_product_id: str, run_id: str | None = None) -> int:
+    """Esaurito nel feed: resta nel database (con dati IA) ma non e' acquistabile.
+
+    Restituisce 1 se l'offerta era attiva ed e' stata disattivata adesso.
+    """
+    cursor = conn.execute("""
+        UPDATE merchant_offers
+        SET availability = FALSE, unavailable_since = CURRENT_TIMESTAMP
+        WHERE advertiser_id = ? AND source_product_id = ? AND availability
+    """, (advertiser_id, source_product_id))
+    deactivated = max(cursor.rowcount or 0, 0)
+    if run_id:
+        # Visto in questa importazione: non va contato tra gli "assenti".
+        conn.execute(
+            "UPDATE merchant_offers SET last_seen_run = ?, last_seen_at = CURRENT_TIMESTAMP WHERE advertiser_id = ? AND source_product_id = ?",
+            (run_id, advertiser_id, source_product_id),
+        )
+    return deactivated
 
 
-def mark_missing_offers_unavailable(conn, advertiser_id: int, run_id: str) -> None:
-    conn.execute(
-        "UPDATE merchant_offers SET availability = FALSE WHERE advertiser_id = ? AND (last_seen_run IS NULL OR last_seen_run <> ?)",
-        (advertiser_id, run_id),
-    )
+def count_missing_offers(conn, advertiser_id: int, run_id: str) -> tuple[int, int]:
+    """(offerte attive non viste in questa importazione, offerte viste)."""
+    row = conn.execute("""
+        SELECT
+            COUNT(*) FILTER (WHERE availability AND last_seen_run IS DISTINCT FROM ?),
+            COUNT(*) FILTER (WHERE last_seen_run = ?)
+        FROM merchant_offers WHERE advertiser_id = ?
+    """, (run_id, run_id, advertiser_id)).fetchone()
+    return int(row[0]), int(row[1])
+
+
+def mark_missing_offers_unavailable(conn, advertiser_id: int, run_id: str) -> int:
+    cursor = conn.execute("""
+        UPDATE merchant_offers
+        SET availability = FALSE, unavailable_since = COALESCE(unavailable_since, CURRENT_TIMESTAMP)
+        WHERE advertiser_id = ? AND availability AND last_seen_run IS DISTINCT FROM ?
+    """, (advertiser_id, run_id))
+    return max(cursor.rowcount or 0, 0)

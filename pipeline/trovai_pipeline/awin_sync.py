@@ -8,12 +8,14 @@ import gzip
 import http.client
 import io
 import json
+import os
 import shutil
 import tempfile
 import time
 import urllib.error
 import urllib.request
 import uuid
+import zlib
 from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -25,9 +27,11 @@ from trovai_pipeline.config import load_secrets, project_root
 from trovai_pipeline.database import connect_database, database_settings
 from trovai_pipeline.gemini import RateLimiter, call_with_retry
 from trovai_pipeline.schema import ensure_prodotti_table
+from trovai_pipeline import incremental
 from trovai_pipeline.feed_cleaner import CleanProduct, clean_display_title, clean_row, clean_title, enrich_with_gemini
 from trovai_pipeline.normalized_catalog import (
     clear_normalized_catalog,
+    count_missing_offers,
     ensure_normalized_schema,
     mark_missing_offers_unavailable,
     mark_offer_unavailable,
@@ -43,6 +47,22 @@ EXPORT_COLUMNS = (
     "discount_percentage", "availability", "merchant_deep_link", "aw_deep_link",
     "image_link", "currency", "data_quality",
 )
+
+
+# Colonne numeriche di feed_import_runs <- chiavi delle statistiche.
+RUN_METRICS = {
+    "new_count": "new", "unchanged_count": "unchanged", "updated_count": "updated",
+    "content_changed_count": "content", "reactivated_count": "reactivated",
+    "deactivated_count": "deactivated", "duplicate_count": "duplicates",
+    "ai_failed_count": "ai_failed", "ai_pending_count": "ai_pending",
+    "ai_cached_count": "ai_cached", "prompt_tokens": "prompt_tokens", "output_tokens": "output_tokens",
+}
+# Protezione dai feed parziali: se per un negozio manca piu' di questa quota delle
+# offerte attive (e almeno MIN_MISSING_FOR_GUARD offerte), non si disattiva nulla.
+DEFAULT_MAX_MISSING_RATIO = 0.3
+MIN_MISSING_FOR_GUARD = 20
+# Oltre questa quota di righe non valide il feed e' considerato inaffidabile.
+MAX_INVALID_RATIO = 0.5
 
 
 class FeedSyncError(RuntimeError):
@@ -102,8 +122,11 @@ def download_rows(url: str) -> Iterator[csv.DictReader]:
             stream.seek(0)
             with io.TextIOWrapper(stream, encoding=encoding, errors="replace", newline="") as text:
                 yield csv.DictReader(text, strict=False)
-    except (OSError, http.client.HTTPException, urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-        raise FeedSyncError("Impossibile scaricare o leggere il feed Awin.") from exc
+    except (OSError, EOFError, zlib.error, csv.Error, http.client.HTTPException, urllib.error.HTTPError,
+            urllib.error.URLError, TimeoutError) as exc:
+        # EOFError/zlib.error: gzip troncato. L'importazione non e' valida e non
+        # deve disattivare nulla (il chiamante interrompe prima di quel passo).
+        raise FeedSyncError("Impossibile scaricare o leggere il feed Awin (download incompleto o file danneggiato).") from exc
     finally:
         if temporary_path and temporary_path.exists():
             temporary_path.unlink()
@@ -118,6 +141,13 @@ def ensure_schema(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_prodotti_awin_source_lookup ON prodotti(advertiser_id, source_product_id) WHERE source = 'awin' AND source_product_id IS NOT NULL")
     conn.execute("CREATE TABLE IF NOT EXISTS feed_enrichment_cache (content_hash TEXT PRIMARY KEY, metadata_json TEXT NOT NULL, enriched_at TEXT NOT NULL)")
     conn.execute("CREATE TABLE IF NOT EXISTS feed_import_runs (run_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, finished_at TEXT, processed_count INTEGER NOT NULL DEFAULT 0, imported_count INTEGER NOT NULL DEFAULT 0, deleted_count INTEGER NOT NULL DEFAULT 0, ai_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL)")
+    # Monitoraggio dell'aggiornamento incrementale (una riga per importazione).
+    for column in RUN_METRICS:
+        conn.execute(f"ALTER TABLE feed_import_runs ADD COLUMN IF NOT EXISTS {column} INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE feed_import_runs ADD COLUMN IF NOT EXISTS ai_cost_estimate DOUBLE PRECISION")
+    conn.execute("ALTER TABLE feed_import_runs ADD COLUMN IF NOT EXISTS error TEXT")
+    conn.execute("ALTER TABLE feed_import_runs ADD COLUMN IF NOT EXISTS warnings TEXT")
+    incremental.ensure_ai_jobs_table(conn)
 
 
 def cached_enrichments(conn, hashes: list[str]) -> dict[str, dict]:
@@ -156,41 +186,86 @@ def feed_enrichment_settings(secrets: Mapping[str, object]) -> tuple[str | None,
 class EnrichmentResult:
     enriched: int = 0
     failed: int = 0
+    cached: int = 0
+    pending: int = 0
+    skipped_claimed: int = 0
+    prompt_tokens: int = 0
+    output_tokens: int = 0
 
 
 def apply_enrichment(conn, products: list[CleanProduct], api_key: str | None, model: str, remaining_budget: int, *,
                      review_all: bool = False, force_fresh: bool = False,
                      limiter: RateLimiter | None = None,
-                     enrich: Callable[[list[CleanProduct], str, str], dict[str, dict]] = enrich_with_gemini) -> EnrichmentResult:
+                     enrich: Callable[[list[CleanProduct], str, str], dict[str, dict]] = enrich_with_gemini,
+                     run_id: str | None = None, commit_progress: bool = False) -> EnrichmentResult:
     """Applica cache e Gemini. Rispetta la quota e conta i blocchi falliti.
 
-    Prima i blocchi da 20 partivano uno dopo l'altro senza pausa e un errore
-    di quota svuotava silenziosamente il risultato: ora ogni blocco attende il
-    proprio turno, i 429 vengono ritentati e gli altri errori sono contati.
+    * Lo stesso contenuto (``content_hash``) viene inviato una sola volta, anche
+      se compare in piu' righe (es. stesse taglie dello stesso articolo).
+    * Ogni hash viene preso in carico in ``feed_ai_jobs`` prima della chiamata:
+      un'altra importazione non lo rielabora; un errore lo lascia ``failed`` e
+      verra' ripreso senza toccare quelli completati.
+    * Con ``commit_progress`` i risultati vengono salvati blocco per blocco: un
+      errore a meta' non fa perdere (e ripagare) le elaborazioni gia' concluse.
     """
     result = EnrichmentResult()
+    incremental.ensure_ai_jobs_table(conn)
     candidates = products if review_all else [product for product in products if product.needs_ai]
-    cache = {} if force_fresh else cached_enrichments(conn, [product.content_hash for product in candidates])
+    unique_hashes = list(dict.fromkeys(product.content_hash for product in candidates))
+    cache = {} if force_fresh else cached_enrichments(conn, unique_hashes)
     for product in candidates:
         if product.content_hash in cache:
             product.apply_enrichment(cache[product.content_hash])
-    to_enrich = (candidates if force_fresh else [product for product in candidates if product.content_hash not in cache])[:remaining_budget]
-    if not to_enrich or not api_key:
+            result.cached += 1
+    # Un rappresentante per hash: Gemini riceve ogni contenuto una volta sola.
+    pending = list({product.content_hash: product for product in candidates if force_fresh or product.content_hash not in cache}.values())
+    if not pending:
         return result
+    budget = max(remaining_budget, 0)
+    if not api_key or budget == 0:
+        incremental.mark_ai_pending(conn, (product.content_hash for product in pending))
+        result.pending = len(pending)
+        return result
+    to_enrich, leftover = pending[:budget], pending[budget:]
+    if leftover:
+        incremental.mark_ai_pending(conn, (product.content_hash for product in leftover))
+        result.pending = len(leftover)
+    if force_fresh:
+        # Revisione completa voluta (bootstrap): rimette in coda anche i "done".
+        conn.executemany("UPDATE feed_ai_jobs SET status = 'pending' WHERE content_hash = ? AND status = 'done'",
+                         [(product.content_hash,) for product in to_enrich])
+    claimed = incremental.claim_ai_jobs(conn, (product.content_hash for product in to_enrich), run_id, model)
+    if commit_progress:
+        conn.commit()
+    result.skipped_claimed = sum(1 for product in to_enrich if product.content_hash not in claimed)
+    to_enrich = [product for product in to_enrich if product.content_hash in claimed]
     limiter = limiter or RateLimiter()
     fresh: dict[str, dict] = {}
     for start in range(0, len(to_enrich), AI_BATCH_SIZE):
         batch = to_enrich[start:start + AI_BATCH_SIZE]
+        hashes = [product.content_hash for product in batch]
         try:
             batch_result = call_with_retry(lambda: enrich(batch, api_key, model), limiter=limiter)
         except Exception as exc:
             result.failed += len(batch)
             print(f"ERRORE Gemini blocco feed {start + 1}-{start + len(batch)}: {type(exc).__name__}: {exc}")
+            incremental.finish_ai_jobs(conn, done=(), failed=hashes, error=f"{type(exc).__name__}: {exc}")
+            if commit_progress:
+                conn.commit()
             continue
-        result.failed += sum(1 for product in batch if product.content_hash not in batch_result)
-        fresh.update(batch_result)
-    store_enrichments(conn, fresh)
-    for product in to_enrich:
+        prompt_tokens = int(getattr(batch_result, "prompt_tokens", 0) or 0)
+        output_tokens = int(getattr(batch_result, "output_tokens", 0) or 0)
+        result.prompt_tokens += prompt_tokens
+        result.output_tokens += output_tokens
+        answered = {value: batch_result[value] for value in hashes if value in batch_result}
+        result.failed += len(hashes) - len(answered)
+        store_enrichments(conn, answered)
+        incremental.finish_ai_jobs(conn, done=answered, failed=[value for value in hashes if value not in answered],
+                                   prompt_tokens=prompt_tokens, output_tokens=output_tokens)
+        if commit_progress:
+            conn.commit()
+        fresh.update(answered)
+    for product in candidates:
         if product.content_hash in fresh:
             product.apply_enrichment(fresh[product.content_hash])
     result.enriched = len(fresh)
@@ -303,7 +378,19 @@ def upsert_products(conn, products: list[CleanProduct], run_id: str) -> None:
     values = [(f"{p.advertiser_id}:{p.merchant_product_id}", p.title, p.source_title, p.clean_title, p.extracted_model, p.description, p.brand, p.product_type, p.sottocategoria, p.gender, p.age_group, p.color, p.size, p.material, p.price, p.sale_price, p.discount_percentage, 1, "nuovo", p.advertiser_name, p.image_link, p.merchant_deep_link, p.advertiser_id, p.merchant_product_id, p.aw_deep_link, p.currency, "awin", p.ean, p.source_product_id, p.data_quality, now, run_id) for p in unique_products.values()]
     fields = [field.strip() for field in columns.split(",")]
     placeholders = ", ".join("?" for _ in fields)
-    updates = ", ".join(f"{field}=excluded.{field}" for field in fields if field != "sku")
+    # Un EAN arrivato dopo cambia la chiave storica (negozio:ID -> negozio:EAN):
+    # si rinomina la riga esistente invece di crearne una seconda.
+    conn.executemany(
+        "UPDATE prodotti SET sku = ? WHERE sku = ? AND NOT EXISTS (SELECT 1 FROM prodotti WHERE sku = ?)",
+        [(f"{p.advertiser_id}:{p.ean}", f"{p.advertiser_id}:{p.source_product_id}", f"{p.advertiser_id}:{p.ean}")
+         for p in unique_products.values() if p.ean and p.ean != p.source_product_id],
+    )
+    # Gli attributi arricchiti non vengono mai sostituiti da un valore vuoto.
+    keep_enrichment = {"brand", "product_type", "sottocategoria", "gender", "age_group", "color", "size", "material", "extracted_model", "description"}
+    updates = ", ".join(
+        f"{field}=COALESCE(excluded.{field}, prodotti.{field})" if field in keep_enrichment else f"{field}=excluded.{field}"
+        for field in fields if field != "sku"
+    )
     conn.executemany(f"INSERT INTO prodotti ({columns}) VALUES ({placeholders}) ON CONFLICT(sku) DO UPDATE SET {updates}", values)
 
 
@@ -387,7 +474,97 @@ def refresh_display_titles() -> int:
     return len(updates)
 
 
-def sync(*, apply: bool, ai_limit: int, export_csv: Path | None = None) -> Counter:
+def _run_warnings(stats: Counter) -> list[str]:
+    return [key.split(":", 1)[1] for key in stats if key.startswith("warning:")]
+
+
+def _finish_run(settings, run_id: str, stats: Counter, status: str, error: str | None = None) -> None:
+    """Registra l'esito su una connessione separata: funziona anche dopo un errore."""
+    tokens = stats["prompt_tokens"], stats["output_tokens"]
+    cost = _estimated_cost(*tokens)
+    assignments = ", ".join(f"{column} = ?" for column in RUN_METRICS)
+    with connect_database(settings) as conn:
+        conn.execute(
+            f"""UPDATE feed_import_runs SET finished_at = ?, processed_count = ?, imported_count = ?,
+                    deleted_count = ?, ai_count = ?, status = ?, error = ?, warnings = ?,
+                    ai_cost_estimate = ?, {assignments}
+                WHERE run_id = ?""",
+            (
+                datetime.now(timezone.utc).isoformat(), stats["received"], stats["eligible"],
+                stats["deactivated"], stats["ai"], status, (error or None) and error[:1000],
+                "\n".join(_run_warnings(stats)) or None, cost,
+                *(stats[key] for key in RUN_METRICS.values()), run_id,
+            ),
+        )
+
+
+def _estimated_cost(prompt_tokens: int, output_tokens: int) -> float | None:
+    """Costo stimato se sono configurati i prezzi per milione di token (facoltativi)."""
+    secrets = load_secrets()
+    try:
+        input_price = float(secrets.get("GEMINI_INPUT_PRICE_PER_MTOK", ""))
+        output_price = float(secrets.get("GEMINI_OUTPUT_PRICE_PER_MTOK", ""))
+    except (TypeError, ValueError):
+        return None
+    return round(prompt_tokens / 1_000_000 * input_price + output_tokens / 1_000_000 * output_price, 6)
+
+
+def _process_batch(conn, batch: list[CleanProduct], *, run_id: str, stats: Counter, ai_possible: bool,
+                   ai_budget: Callable[[], int], gemini_key: str | None, model: str, limiter: RateLimiter,
+                   enrich: Callable) -> list[CleanProduct]:
+    """Classifica il blocco prima dell'IA e scrive solo cio' che e' cambiato.
+
+    Restituisce i prodotti passati dal percorso "contenuti" (nuovi o modificati).
+    """
+    existing = incremental.fetch_existing_offers(conn, batch)
+    groups: dict[str, list[CleanProduct]] = defaultdict(list)
+    for index, product in enumerate(batch):
+        offer = existing.get(index)
+        product.offer_id = offer.id if offer else None
+        groups[incremental.classify(product, offer)].append(product)
+    for kind in (incremental.NEW, incremental.UNCHANGED, incremental.UPDATED, incremental.REACTIVATED, incremental.CONTENT):
+        stats[kind] += len(groups[kind])
+    # Prodotti invariati ma con un'elaborazione IA ancora in sospeso o fallita:
+    # vengono ripresi, solo se l'IA e' utilizzabile in questa esecuzione.
+    if ai_possible:
+        kept = [*groups[incremental.UNCHANGED], *groups[incremental.UPDATED], *groups[incremental.REACTIVATED]]
+        retry = incremental.retryable_ai_hashes(conn, (p.content_hash for p in kept if p.needs_ai))
+        if retry:
+            for kind in (incremental.UNCHANGED, incremental.UPDATED, incremental.REACTIVATED):
+                moved = [p for p in groups[kind] if p.needs_ai and p.content_hash in retry]
+                groups[kind] = [p for p in groups[kind] if not (p.needs_ai and p.content_hash in retry)]
+                groups["retry"].extend(moved)
+            stats["ai_retry"] += len(groups["retry"])
+    incremental.touch_unchanged(conn, groups[incremental.UNCHANGED], run_id)
+    incremental.update_operational(conn, [*groups[incremental.UPDATED], *groups[incremental.REACTIVATED]], run_id)
+    content = [*groups[incremental.NEW], *groups[incremental.CONTENT], *groups["retry"]]
+    if content:
+        enrichment = apply_enrichment(conn, content, gemini_key, model, ai_budget(), limiter=limiter,
+                                      enrich=enrich, run_id=run_id, commit_progress=True)
+        stats["ai"] += enrichment.enriched
+        stats["ai_failed"] += enrichment.failed
+        stats["ai_pending"] += enrichment.pending
+        stats["ai_cached"] += enrichment.cached
+        stats["prompt_tokens"] += enrichment.prompt_tokens
+        stats["output_tokens"] += enrichment.output_tokens
+        upsert_products(conn, content, run_id)
+        upsert_normalized_catalog(conn, content, run_id)
+    conn.commit()
+    return content
+
+
+def sync(*, apply: bool, ai_limit: int, export_csv: Path | None = None,
+         max_missing_ratio: float = DEFAULT_MAX_MISSING_RATIO, min_missing_for_guard: int = MIN_MISSING_FOR_GUARD,
+         enrich: Callable = enrich_with_gemini, limiter: RateLimiter | None = None) -> Counter:
+    """Importazione incrementale (vedi ``incremental``): l'IA vede solo nuovi o modificati.
+
+    Ordine dei passi:
+    1. lock: una sola importazione alla volta;
+    2. lettura del feed a blocchi; ogni blocco viene classificato e salvato
+       (commit per blocco: un errore non fa perdere il lavoro fatto);
+    3. solo se il feed e' stato letto tutto ed e' plausibile, disattivazione
+       delle offerte assenti, con la protezione per negozio contro i feed parziali.
+    """
     secrets = load_secrets()
     feed_url = str(secrets.get("AWIN_FEED_DOWNLOAD_URL", "")).strip()
     if not feed_url:
@@ -397,68 +574,110 @@ def sync(*, apply: bool, ai_limit: int, export_csv: Path | None = None) -> Count
         raise FeedSyncError("Configura PostgreSQL prima di importare il feed.")
     run_id, stats = uuid.uuid4().hex, Counter()
     gemini_key, model = feed_enrichment_settings(secrets)
-    limiter = RateLimiter()
+    limiter = limiter or RateLimiter()
     seen_advertisers: set[int] = set()
+    seen_identities: set[tuple[int, str]] = set()
     export_handle = export_csv.open("w", encoding="utf-8", newline="") if export_csv else None
     writer = csv.DictWriter(export_handle, fieldnames=EXPORT_COLUMNS) if export_handle else None
     if writer:
         writer.writeheader()
+
+    def ai_budget() -> int:
+        return max(ai_limit - stats["ai"] - stats["ai_failed"], 0)
+
+    run_started = False
     try:
       with connect_database(settings) as conn:
         ensure_schema(conn)
         ensure_normalized_schema(conn)
+        conn.commit()
         if apply:
+            if not incremental.try_sync_lock(conn):
+                raise FeedSyncError("Un'altra importazione del catalogo e' in corso: riprova quando e' terminata.")
             conn.execute("INSERT INTO feed_import_runs (run_id, started_at, status) VALUES (?, ?, 'running')", (run_id, datetime.now(timezone.utc).isoformat()))
-        with download_rows(feed_url) as rows:
-            batch: list[CleanProduct] = []
-            for raw_row in rows:
-                stats["received"] += 1
-                product = clean_row(raw_row)
-                if product is None:
-                    stats["skipped_invalid"] += 1
-                    continue
-                seen_advertisers.add(product.advertiser_id)
-                if str(raw_row.get("availability", "")).strip().lower() != "in_stock":
-                    stats["removed_unavailable"] += 1
-                    if apply:
-                        result = conn.execute("DELETE FROM prodotti WHERE source = 'awin' AND advertiser_id = ? AND source_product_id = ?", (product.advertiser_id, product.source_product_id))
-                        stats["deleted"] += max(result.rowcount or 0, 0)
-                        mark_offer_unavailable(conn, product.advertiser_id, product.source_product_id)
-                    continue
-                batch.append(product)
-                if len(batch) >= BATCH_SIZE:
-                    if apply:
-                        enrichment = apply_enrichment(conn, batch, gemini_key, model, max(ai_limit - stats["ai"] - stats["ai_failed"], 0), limiter=limiter)
-                        stats["ai"] += enrichment.enriched
-                        stats["ai_failed"] += enrichment.failed
+            conn.commit()
+            run_started = True
+        try:
+            with download_rows(feed_url) as rows:
+                batch: list[CleanProduct] = []
+
+                def flush() -> None:
                     if writer:
                         export_products(writer, batch)
                     if apply:
-                        upsert_products(conn, batch, run_id)
-                        upsert_normalized_catalog(conn, batch, run_id)
+                        _process_batch(conn, batch, run_id=run_id, stats=stats, ai_possible=bool(gemini_key) and ai_budget() > 0,
+                                       ai_budget=ai_budget, gemini_key=gemini_key, model=model, limiter=limiter, enrich=enrich)
                     stats["eligible"] += len(batch)
-                    batch = []
-            if batch:
-                if apply:
-                    enrichment = apply_enrichment(conn, batch, gemini_key, model, max(ai_limit - stats["ai"] - stats["ai_failed"], 0), limiter=limiter)
-                    stats["ai"] += enrichment.enriched
-                    stats["ai_failed"] += enrichment.failed
-                if writer:
-                    export_products(writer, batch)
-                if apply:
-                    upsert_products(conn, batch, run_id)
-                    upsert_normalized_catalog(conn, batch, run_id)
-                stats["eligible"] += len(batch)
-        if apply:
-            for advertiser_id in seen_advertisers:
-                stale = conn.execute("DELETE FROM prodotti WHERE source = 'awin' AND advertiser_id = ? AND (last_seen_run IS NULL OR last_seen_run <> ?)", (advertiser_id, run_id))
-                stats["deleted"] += max(stale.rowcount or 0, 0)
-                mark_missing_offers_unavailable(conn, advertiser_id, run_id)
-            conn.execute("UPDATE feed_import_runs SET finished_at = ?, processed_count = ?, imported_count = ?, deleted_count = ?, ai_count = ?, status = 'success' WHERE run_id = ?", (datetime.now(timezone.utc).isoformat(), stats["received"], stats["eligible"], stats["deleted"], stats["ai"], run_id))
+                    batch.clear()
+
+                for raw_row in rows:
+                    stats["received"] += 1
+                    product = clean_row(raw_row)
+                    if product is None:
+                        stats["skipped_invalid"] += 1
+                        continue
+                    seen_advertisers.add(product.advertiser_id)
+                    key = incremental.identity_key(product)
+                    if key in seen_identities:
+                        stats["duplicates"] += 1  # riga tecnica ripetuta: vale la prima
+                        continue
+                    seen_identities.add(key)
+                    if str(raw_row.get("availability", "")).strip().lower() != "in_stock":
+                        stats["removed_unavailable"] += 1
+                        if apply:
+                            # Esaurito: resta salvato con i dati IA, ma non e' acquistabile.
+                            stats["deactivated"] += mark_offer_unavailable(conn, product.advertiser_id, product.source_product_id, run_id)
+                            incremental.deactivate_prodotti(conn, product.advertiser_id, product.source_product_id, run_id)
+                        continue
+                    batch.append(product)
+                    if len(batch) >= BATCH_SIZE:
+                        flush()
+                if batch:
+                    flush()
+            if apply:
+                conn.commit()
+                _deactivate_missing(conn, run_id, stats, seen_advertisers, max_missing_ratio, min_missing_for_guard)
+                conn.commit()
+            if run_started:
+                incremental.release_sync_lock(conn)
+        except BaseException:
+            conn.rollback()
+            if run_started:
+                incremental.release_sync_lock(conn)
+            raise
+      if run_started:
+          _finish_run(settings, run_id, stats, "partial" if _run_warnings(stats) else "success")
+    except BaseException as exc:
+        if run_started:
+            _finish_run(settings, run_id, stats, "failed", f"{type(exc).__name__}: {exc}")
+        raise
     finally:
         if export_handle:
             export_handle.close()
     return stats
+
+
+def _deactivate_missing(conn, run_id: str, stats: Counter, advertisers: set[int],
+                        max_missing_ratio: float, min_missing_for_guard: int) -> None:
+    """Disattiva le offerte assenti, solo dopo un'importazione completa e plausibile."""
+    if stats["received"] == 0:
+        stats["warning:feed vuoto: nessuna disattivazione"] += 1
+        return
+    if stats["skipped_invalid"] > MAX_INVALID_RATIO * stats["received"]:
+        stats["warning:troppe righe non valide nel feed: nessuna disattivazione"] += 1
+        return
+    for advertiser_id in sorted(advertisers):
+        missing, seen = count_missing_offers(conn, advertiser_id, run_id)
+        if missing == 0:
+            continue
+        if missing >= min_missing_for_guard and missing > max_missing_ratio * (missing + seen):
+            # Probabile feed parziale per questo negozio: meglio prezzi vecchi per un
+            # giorno che un catalogo svuotato. Resta un avviso nell'importazione.
+            stats[f"warning:negozio {advertiser_id}: mancano {missing} offerte su {missing + seen}, disattivazione sospesa"] += 1
+            stats["deactivation_skipped"] += missing
+            continue
+        stats["deactivated"] += mark_missing_offers_unavailable(conn, advertiser_id, run_id)
+        incremental.deactivate_prodotti(conn, advertiser_id, run_id=run_id)
 
 
 def main() -> None:
@@ -469,6 +688,8 @@ def main() -> None:
     parser.add_argument("--bootstrap-limit", type=int, help="Crea un catalogo iniziale bilanciato tra i merchant del feed.")
     parser.add_argument("--replace-catalog", action="store_true", help="Con bootstrap, elimina demo e precedenti prodotti Awin prima di importare il campione curato.")
     parser.add_argument("--refresh-display-titles", action="store_true", help="Pulisce i titoli già nel database, senza download o chiamate IA.")
+    parser.add_argument("--max-missing-ratio", type=float, default=DEFAULT_MAX_MISSING_RATIO, help="Quota massima di offerte di un negozio che possono sparire in una volta prima di sospendere la disattivazione (predefinito: 0.3).")
+    parser.add_argument("--retry-ai-failures", action="store_true", help="Rimette in coda le elaborazioni IA che hanno esaurito i tentativi automatici.")
     args = parser.parse_args()
     if args.refresh_display_titles:
         print("TITOLI RIPULITI")
@@ -478,10 +699,46 @@ def main() -> None:
         stats = bootstrap_clean_catalog(limit=max(args.bootstrap_limit, 1), ai_limit=max(args.ai_limit, 0), export_csv=args.export_csv, replace_catalog=args.replace_catalog)
         print("CATALOGO INIZIALE CURATO")
     else:
-        stats = sync(apply=args.apply, ai_limit=max(args.ai_limit, 0), export_csv=args.export_csv)
+        if args.retry_ai_failures:
+            print(f"elaborazioni IA rimesse in coda: {retry_ai_failures()}")
+        stats = sync(apply=args.apply, ai_limit=max(args.ai_limit, 0), export_csv=args.export_csv,
+                     max_missing_ratio=args.max_missing_ratio)
         print("IMPORTAZIONE" if args.apply else "ANTEPRIMA (nessuna scrittura)")
-    for key in ("received", "eligible", "selected", "removed_unavailable", "skipped_invalid", "ai", "ai_failed", "deleted"):
+    print_summary(stats)
+
+
+SUMMARY_KEYS = (
+    ("received", "righe del feed"), ("eligible", "righe disponibili valide"), ("selected", "selezionati (catalogo iniziale)"),
+    ("new", "nuovi"), ("unchanged", "invariati"), ("updated", "aggiornati (solo dati operativi)"),
+    ("reactivated", "riattivati"), ("content", "contenuti modificati"), ("deactivated", "disattivati"),
+    ("deactivation_skipped", "disattivazioni sospese (feed parziale)"), ("removed_unavailable", "righe esaurite"),
+    ("duplicates", "righe duplicate"), ("skipped_invalid", "righe non valide"), ("ai", "elaborati con IA"),
+    ("ai_cached", "risolti dalla cache IA"), ("ai_retry", "ripresi dopo errore/attesa"), ("ai_pending", "in attesa di IA"),
+    ("ai_failed", "errori IA"), ("prompt_tokens", "token in ingresso"), ("output_tokens", "token in uscita"),
+)
+
+
+def print_summary(stats: Counter) -> None:
+    """Riepilogo a terminale e, su GitHub Actions, nel riepilogo del workflow."""
+    for key, _ in SUMMARY_KEYS:
         print(f"{key}: {stats[key]}")
+    warnings = _run_warnings(stats)
+    for warning in warnings:
+        print(f"ATTENZIONE: {warning}")
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_path:
+        lines = ["### Aggiornamento catalogo", "", "| | |", "|---|---:|"]
+        lines += [f"| {label} | {stats[key]} |" for key, label in SUMMARY_KEYS if stats[key]]
+        lines += [f"> ⚠️ {warning}" for warning in warnings]
+        with open(summary_path, "a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+
+
+def retry_ai_failures() -> int:
+    settings = database_settings(project_root(), load_secrets())
+    with connect_database(settings) as conn:
+        ensure_schema(conn)
+        return incremental.reset_failed_ai_jobs(conn)
 
 
 if __name__ == "__main__":
