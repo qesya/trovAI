@@ -62,10 +62,21 @@ export async function POST(request: Request) {
     return Response.json(result);
   } catch (error) {
     console.error("Errore durante la ricerca", error);
+    if (isCatalogMissing(error)) {
+      return Response.json(
+        { error: "Il catalogo non è ancora disponibile: è in corso il primo caricamento dei prodotti. Riprova tra qualche minuto." },
+        { status: 503 },
+      );
+    }
     const message =
       error instanceof ConfigurationError
         ? error.message
         : "Si è verificato un errore durante la ricerca. Riprova più tardi.";
     return Response.json({ error: message }, { status: 500 });
   }
+}
+
+/** Tabella o vista non ancora creata dalla pipeline (PostgreSQL 42P01 = undefined_table). */
+function isCatalogMissing(error: unknown): boolean {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "42P01";
 }

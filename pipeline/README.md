@@ -8,7 +8,7 @@ PostgreSQL (prodotto → colore → taglia → offerta del negozio).
 
 ```
 trovai_pipeline/
-├── config.py            # chiavi da variabili d'ambiente o .streamlit/secrets.toml
+├── config.py            # chiavi da variabili d'ambiente o .env
 ├── gemini.py            # ritmo richieste e ritentativi (unico per tutto il progetto)
 ├── database.py          # connessione PostgreSQL / SQLite
 ├── feed_cleaner.py      # regole di pulizia + revisione Gemini dei campi
@@ -40,15 +40,20 @@ Su Windows: `python -m venv .venv` e `.\.venv\Scripts\Activate.ps1`.
 
 Due modi, anche combinati (le variabili d'ambiente vincono):
 
-1. **In locale:** copia `secrets.example.toml` in `.streamlit/secrets.toml` e compilalo.
-2. **In CI o su un server:** imposta le variabili elencate in `.env.example`
+1. **In locale:** copia `.env.example` (radice del repository) in `.env` e compilalo.
+2. **In CI o su un server:** imposta le stesse variabili nell'ambiente
    (su GitHub: *Settings → Secrets and variables → Actions*).
 
-`.streamlit/secrets.toml` e `.env` sono esclusi da Git tramite `.gitignore`.
+Per il database basta `DATABASE_URL` (per Neon usa la stringa *unpooled*; per gli
+host remoti si attiva `sslmode=require` se l'URL non dice altro). In alternativa
+valgono le cinque variabili `POSTGRES_*`. Un vecchio `.streamlit/secrets.toml`
+viene ancora letto, con priorita' piu' bassa di `.env`.
+
+`.env` e `.streamlit/secrets.toml` sono esclusi da Git tramite `.gitignore`.
 
 ## Comandi
 
-Lanciali dalla radice del repository, dove si trova `.streamlit/secrets.toml` (oppure imposta `TROVAI_HOME`).
+Lanciali dalla radice del repository, dove si trova `.env` (oppure imposta `TROVAI_HOME`).
 
 ```bash
 # Anteprima: non scarica e non scrive nulla

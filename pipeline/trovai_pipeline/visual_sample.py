@@ -181,7 +181,7 @@ def build_catalog(*, apply: bool) -> dict[str, int]:
     secrets = load_secrets()
     key = str(secrets.get("GEMINI_VISION_API_KEY", "")).strip()
     if not key:
-        raise EmbeddingTestError("Manca GEMINI_VISION_API_KEY in .streamlit/secrets.toml.")
+        raise EmbeddingTestError("Manca GEMINI_VISION_API_KEY nel file .env (o come variabile d'ambiente).")
     settings = database_settings(project_root(), secrets)
     if settings.backend != "postgres":
         raise EmbeddingTestError("Il catalogo dimostrativo richiede PostgreSQL.")
