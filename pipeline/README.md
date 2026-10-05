@@ -62,12 +62,17 @@ trovai-pipeline
 # Test controllato: 50 prodotti, 10 immagini
 trovai-pipeline --apply --replace-catalog --catalog-limit 50 --feed-ai-limit 50 --title-ai-limit 50 --image-limit 10
 
-# Aggiornamento incrementale (prezzi, disponibilita', nuovi prodotti)
+# Aggiornamento incrementale: l'IA vede solo prodotti nuovi o con contenuti cambiati
 trovai-sync --apply --ai-limit 500
+# Rimette in coda le elaborazioni IA fallite piu' volte
+trovai-sync --apply --retry-ai-failures
 
 # Prova isolata su 10 prodotti, non tocca il catalogo principale
 trovai-isolated-test --apply --limit 10
 ```
+
+Come funziona l'aggiornamento incrementale (identita', classificazione, feed
+parziali, stato IA, metriche): [`docs/catalogo-incrementale.md`](../docs/catalogo-incrementale.md).
 
 Equivalenti senza installazione: `python -m trovai_pipeline.pipeline ...`,
 `python -m trovai_pipeline.awin_sync ...`.
