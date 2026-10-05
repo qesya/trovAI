@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -38,6 +39,7 @@ def isolated_config(monkeypatch, tmp_path):
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("TROVAI_HOME", str(tmp_path))
     monkeypatch.delenv("TROVAI_SECRETS_FILE", raising=False)
+    monkeypatch.delenv("TROVAI_ENV_FILE", raising=False)
 
 
 @pytest.fixture
@@ -46,12 +48,6 @@ def postgres_settings():
     url = os.environ.get("TROVAI_TEST_DATABASE_URL")
     if not url:
         pytest.skip("TROVAI_TEST_DATABASE_URL non impostata")
-    from urllib.parse import urlparse
+    from trovai_pipeline.database import database_settings
 
-    from trovai_pipeline.database import DatabaseSettings
-
-    parsed = urlparse(url)
-    return DatabaseSettings(
-        backend="postgres", host=parsed.hostname, port=parsed.port or 5432,
-        database=parsed.path.lstrip("/"), user=parsed.username, password=parsed.password or "",
-    )
+    return database_settings(Path("."), {"DATABASE_URL": url})

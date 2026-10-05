@@ -7,6 +7,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from urllib.parse import parse_qs, unquote, urlsplit
 
 
 def _prefer_official_postgres_library_on_windows() -> None:
@@ -58,6 +59,7 @@ class DatabaseSettings:
     database: Optional[str] = None
     user: Optional[str] = None
     password: Optional[str] = None
+    sslmode: Optional[str] = None
 
     @property
     def cache_key(self) -> str:
@@ -81,7 +83,10 @@ def database_settings(
     values: Optional[Mapping[str, Any]] = None,
     sqlite_path: Optional[str] = None,
 ) -> DatabaseSettings:
-    """Preferisce PostgreSQL quando sono presenti tutte le cinque impostazioni."""
+    """Preferisce PostgreSQL: ``DATABASE_URL`` oppure le cinque impostazioni POSTGRES_*."""
+    url = _setting("DATABASE_URL", values)
+    if url:
+        return _settings_from_url(url)
     postgres = {
         "host": _setting("POSTGRES_HOST", values),
         "port": _setting("POSTGRES_PORT", values),
@@ -115,6 +120,42 @@ def database_settings(
     return DatabaseSettings(backend="sqlite", sqlite_path=candidate)
 
 
+def _settings_from_url(url: str) -> DatabaseSettings:
+    """Converte ``postgresql://utente:password@host:porta/db?sslmode=...``.
+
+    Gli host remoti (Neon, Supabase, ...) usano ``sslmode=require`` se l'URL non
+    indica diversamente; ``localhost`` resta senza SSL obbligatorio.
+    """
+    parts = urlsplit(url)
+    if parts.scheme not in {"postgres", "postgresql"}:
+        raise DatabaseConfigurationError("DATABASE_URL deve iniziare con postgresql://")
+    database = unquote(parts.path.lstrip("/"))
+    missing = [
+        name
+        for name, value in (("host", parts.hostname), ("database", database), ("user", parts.username))
+        if not value
+    ]
+    if missing:
+        raise DatabaseConfigurationError("DATABASE_URL incompleto: mancano " + ", ".join(missing))
+    try:
+        port = parts.port or 5432
+    except ValueError as exc:
+        raise DatabaseConfigurationError("DATABASE_URL: porta non valida") from exc
+    query = parse_qs(parts.query)
+    sslmode = (query.get("sslmode") or [None])[0]
+    if not sslmode and parts.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        sslmode = "require"
+    return DatabaseSettings(
+        backend="postgres",
+        host=parts.hostname,
+        port=port,
+        database=database,
+        user=unquote(parts.username or ""),
+        password=unquote(parts.password) if parts.password is not None else None,
+        sslmode=sslmode,
+    )
+
+
 def _qmark_to_percent(sql: str) -> str:
     """Converte i parametri SQLite usati dal progetto in parametri PostgreSQL."""
     return sql.replace("?", "%s")
@@ -146,12 +187,16 @@ class PostgresConnection:
             raise DatabaseConfigurationError(
                 "Manca psycopg. Attiva .venv-local e installa le dipendenze."
             )
+        options: dict[str, Any] = {}
+        if settings.sslmode:
+            options["sslmode"] = settings.sslmode
         self._connection = psycopg.connect(
             host=settings.host,
             port=settings.port,
             dbname=settings.database,
             user=settings.user,
             password=settings.password,
+            **options,
         )
 
     def execute(self, sql: str, params: Any = None) -> _PostgresCursor:

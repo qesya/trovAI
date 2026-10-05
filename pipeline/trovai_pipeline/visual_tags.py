@@ -110,7 +110,7 @@ def run_test(*, dry_run: bool, force: bool) -> dict[str, int]:
     api_key = str(secrets.get("GEMINI_VISION_API_KEY", "")).strip()
     if not api_key:
         raise EmbeddingTestError(
-            "Manca GEMINI_VISION_API_KEY in .streamlit/secrets.toml. Non incollare la chiave nel terminale."
+            "Manca GEMINI_VISION_API_KEY nel file .env (o come variabile d'ambiente). Non incollare la chiave nel terminale."
         )
     settings = database_settings(project_root(), secrets)
     if settings.backend != "postgres":
