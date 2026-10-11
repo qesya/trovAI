@@ -482,10 +482,10 @@ def clean_row(row: Mapping[str, Any]) -> Optional[CleanProduct]:
     if product_type is None:
         product_type = _first_rule_match(searchable, _CATEGORY_RULES)
     color = _known_canonical_value(_coalesce_text(row, "color", "colour"), _COLOR_RULES) or _first_rule_match(searchable, _COLOR_RULES)
-    material = _known_canonical_value(_coalesce_text(row, "material", "fabric"), _MATERIAL_RULES) or _first_rule_match(searchable, _MATERIAL_RULES)
+    material = _known_canonical_value(_coalesce_text(row, "material", "fabric", "fashion:material"), _MATERIAL_RULES) or _first_rule_match(searchable, _MATERIAL_RULES)
     gender = _known_canonical_value(_coalesce_text(row, "gender", "sex"), _GENDER_RULES) or _first_rule_match(searchable, _GENDER_RULES)
     age_group = _known_canonical_value(_coalesce_text(row, "age_group"), _AGE_GROUP_RULES) or _first_rule_match(searchable, _AGE_GROUP_RULES)
-    size = _normalize_size(_coalesce_text(row, "size", "sizes", "available_sizes", "taglia")) or _extract_size(raw_title or "") or _extract_size(description or "")
+    size = _normalize_size(_coalesce_text(row, "size", "sizes", "available_sizes", "taglia", "fashion:size")) or _extract_size(raw_title or "") or _extract_size(description or "")
     title = clean_display_title(
         title_without_size,
         brand=_normalize_brand(_coalesce_text(row, "brand", "brand_name")),
@@ -510,7 +510,7 @@ def clean_row(row: Mapping[str, Any]) -> Optional[CleanProduct]:
     semantic_values = (
         NORMALIZATION_VERSION, raw_title, searchable_description, _normalize_brand(_coalesce_text(row, "brand", "brand_name")), source_category,
         normalized_text(_coalesce_text(row, "color", "colour")),
-        normalized_text(_coalesce_text(row, "material", "fabric")),
+        normalized_text(_coalesce_text(row, "material", "fabric", "fashion:material")),
         normalized_text(_coalesce_text(row, "gender", "sex")),
     )
     content_hash = hashlib.sha256("|".join(filter(None, semantic_values)).encode("utf-8")).hexdigest()

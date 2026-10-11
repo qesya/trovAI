@@ -311,6 +311,23 @@ def select_balanced_products(products: list[CleanProduct], limit: int) -> list[C
     return selected
 
 
+# I feed Awin indicano la disponibilita' con colonne diverse: `availability` (usata dal feed
+# di prova), oppure `in_stock` / `stock_status` nei feed reali. Senza nessuna di queste
+# l'articolo resta escluso.
+UNAVAILABLE_VALUES = {"0", "false", "no", "out of stock", "out_of_stock", "outofstock", "unavailable", "sold out"}
+
+
+def is_available(raw_row: Mapping[str, str]) -> bool:
+    for column in ("availability", "in_stock", "stock_status", "is_for_sale"):
+        value = str(raw_row.get(column, "") or "").strip().lower()
+        if not value:
+            continue
+        if column == "availability":
+            return value == "in_stock"
+        return value not in UNAVAILABLE_VALUES
+    return False
+
+
 def bootstrap_clean_catalog(*, limit: int, ai_limit: int, export_csv: Path | None, replace_catalog: bool) -> Counter:
     """Crea il primo catalogo controllato, bilanciato tra tutti i merchant del feed."""
     if not replace_catalog:
@@ -330,7 +347,7 @@ def bootstrap_clean_catalog(*, limit: int, ai_limit: int, export_csv: Path | Non
             if product is None:
                 stats["skipped_invalid"] += 1
                 continue
-            if str(raw_row.get("availability", "")).strip().lower() != "in_stock":
+            if not is_available(raw_row):
                 stats["removed_unavailable"] += 1
                 continue
             candidates.append(product)
@@ -622,7 +639,7 @@ def sync(*, apply: bool, ai_limit: int, export_csv: Path | None = None,
                         stats["duplicates"] += 1  # riga tecnica ripetuta: vale la prima
                         continue
                     seen_identities.add(key)
-                    if str(raw_row.get("availability", "")).strip().lower() != "in_stock":
+                    if not is_available(raw_row):
                         stats["removed_unavailable"] += 1
                         if apply:
                             # Esaurito: resta salvato con i dati IA, ma non e' acquistabile.
