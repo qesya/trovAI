@@ -5,6 +5,7 @@ import { DEMO_DISCLOSURE } from "@/lib/disclosures";
 import { formatPrice } from "@/lib/money";
 import type { ProductResult, SavedItem } from "@/lib/types";
 import { BagIcon, ExternalIcon, HeartIcon, ThumbDownIcon, ThumbUpIcon } from "./icons";
+import { sizeLabel } from "@/lib/product-size";
 import { useStore } from "./store";
 
 type FeedbackState = "idle" | "sending" | "yes" | "no" | "error";
@@ -95,7 +96,7 @@ export function ProductCard({ product, index }: { product: ProductResult; index:
             {product.title}
           </h3>
           <p className="mt-1 text-sm text-muted">
-            {[product.color, product.material, product.size && `Taglie ${product.size}`]
+            {[product.color, product.material, sizeLabel(product.size, product.title)]
               .filter(Boolean)
               .join(" · ")}
           </p>
