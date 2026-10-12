@@ -1,3 +1,4 @@
+import { catalogSize } from "@/lib/product-size";
 import { connection } from "next/server";
 import { ShoppingChat } from "@/components/ShoppingChat";
 import { query } from "@/lib/server/db";
@@ -19,14 +20,14 @@ async function catalogOptions() {
       query<{ merchant: string }>(
         "SELECT DISTINCT merchant FROM catalog_search WHERE availability = 1 ORDER BY merchant",
       ),
-      query<{ size: string }>(
-        "SELECT DISTINCT size FROM catalog_search WHERE availability = 1 AND size IS NOT NULL",
+      query<{ size: string; title: string }>(
+        "SELECT DISTINCT size, title FROM catalog_search WHERE availability = 1 AND size IS NOT NULL",
       ),
       query<{ n: number }>("SELECT COUNT(*) AS n FROM catalog_search WHERE availability = 1"),
     ]);
     const merchants = merchantRows.map((r) => r.merchant);
     const sizes = [
-      ...new Set(sizeRows.flatMap((r) => r.size.split(",").map((s) => s.trim()).filter(Boolean))),
+      ...new Set(sizeRows.flatMap((r) => (catalogSize(r.size, r.title) ?? "").split(",").map((s) => s.trim()).filter(Boolean))),
     ].sort(sortSizes);
     return { merchants, sizes, productCount: count?.n ?? 0 };
   } catch (error) {

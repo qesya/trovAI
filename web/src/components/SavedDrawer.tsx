@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { effectivePrice, formatPrice } from "@/lib/money";
 import type { SavedItem } from "@/lib/types";
 import { BagIcon, CloseIcon, HeartIcon } from "./icons";
+import { sizeLabel } from "@/lib/product-size";
 import { useStore } from "./store";
 
 function ItemRow({ item, onRemove }: { item: SavedItem; onRemove: () => void }) {
@@ -13,7 +14,7 @@ function ItemRow({ item, onRemove }: { item: SavedItem; onRemove: () => void }) 
       <div className="min-w-0 flex-1">
         <p className="truncate font-medium text-ink">{item.title}</p>
         <p className="mt-0.5 text-sm text-muted">
-          {[item.brand, item.size && `Taglie ${item.size}`].filter(Boolean).join(" · ")}
+          {[item.brand, sizeLabel(item.size, item.title)].filter(Boolean).join(" · ")}
         </p>
       </div>
       <div className="flex flex-col items-end gap-1">
