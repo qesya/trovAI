@@ -85,7 +85,7 @@ def ensure_future_visual_schema(conn) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS offer_visual_enrichments_asset_idx ON offer_visual_enrichments(asset_id)")
     conn.execute("DROP VIEW IF EXISTS catalog_search_enriched")
     conn.execute("""
-        CREATE VIEW catalog_search_enriched AS
+        CREATE VIEW catalog_search_enriched WITH (security_invoker = true) AS
         SELECT
             search.*,
             enrichments.effective_color,

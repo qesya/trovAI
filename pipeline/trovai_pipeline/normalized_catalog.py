@@ -149,7 +149,7 @@ def ensure_normalized_schema(conn) -> None:
     # il blocco durante gli aggiornamenti della struttura del catalogo.
     conn.execute("DROP VIEW IF EXISTS catalog_search")
     conn.execute("""
-        CREATE VIEW catalog_search AS
+        CREATE VIEW catalog_search WITH (security_invoker = true) AS
         SELECT
             offers.id,
             products.id AS product_id,
