@@ -24,6 +24,8 @@ export function ProductCard({ product, index }: { product: ProductResult; index:
 
   const saved: SavedItem = {
     id: product.id,
+    link: product.link,
+    merchant: product.merchant,
     title: product.title,
     brand: product.brand,
     size: product.size,
@@ -141,8 +143,8 @@ export function ProductCard({ product, index }: { product: ProductResult; index:
               type="button"
               onClick={() => toggleCart(saved)}
               aria-pressed={inCart}
-              aria-label={inCart ? "Rimuovi dal carrello" : "Aggiungi al carrello"}
-              title={inCart ? "Nel carrello" : "Aggiungi al carrello"}
+              aria-label={inCart ? "Rimuovi dalla lista" : "Aggiungi alla lista"}
+              title={inCart ? "Nella lista" : "Aggiungi alla lista"}
               className={`grid size-11 shrink-0 place-items-center rounded-full border transition ${
                 inCart ? "border-wine bg-wine-soft text-wine" : "border-line text-wine hover:bg-blush"
               }`}

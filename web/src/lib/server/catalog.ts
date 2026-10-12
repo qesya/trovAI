@@ -151,7 +151,13 @@ export async function queryCatalog(filters: Filters, limit = 20, offset = 0): Pr
     }
   }
 
-  if (filters.size) add("size ILIKE ?", like(filters.size));
+  if (filters.size?.trim()) {
+    // Una taglia completa: 38 non include 38.5, M non include XL.
+    add(
+      "EXISTS (SELECT 1 FROM regexp_split_to_table(COALESCE(size, ''), ',') AS sizes(value) WHERE lower(btrim(sizes.value)) = lower(?))",
+      filters.size.trim(),
+    );
+  }
   if (filters.max_price != null) add(`${EFFECTIVE_PRICE} <= ?`, Number(filters.max_price));
   if (filters.min_price) add(`${EFFECTIVE_PRICE} >= ?`, Number(filters.min_price));
   if (filters.only_on_sale === true) add("sale_price IS NOT NULL AND sale_price < price");

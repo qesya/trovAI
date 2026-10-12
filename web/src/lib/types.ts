@@ -69,6 +69,9 @@ export interface SearchResponse {
 }
 
 export interface SavedItem {
+  /** Opzionali per conservare le sessioni salvate prima dei link nella lista. */
+  link?: string;
+  merchant?: string;
   id: number;
   title: string;
   brand: string | null;
