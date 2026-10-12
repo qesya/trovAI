@@ -2,10 +2,11 @@
 
 Traccia per il confronto con il titolare di TrovAI e il referente Awin o del negozio, aggiornata al 12 ottobre 2026. TrovAI è un comparatore: l'utente sceglie un'offerta e acquista sul sito del partner. La lista prodotti non è un carrello e TrovAI non gestisce ordini o pagamenti. L'ambiente attuale è staging.
 
-## Stato verificato nel codice
+## Stato verificato
 
 - `web/src/components/ProductCard.tsx` apre il link risolto dal backend. `SavedDrawer.tsx` conserva ora lo stesso URL nella lista, senza riscriverne i parametri. Le vecchie sessioni senza URL invitano a ripetere la ricerca.
 - `web/src/lib/server/awin.ts`, funzione `resolveProductLink`, preferisce `aw_deep_link`, ma può ripiegare su `merchant_deep_link`. Questo fallback può inviare traffico non attribuibile: un URL di negozio non dimostra affiliazione.
+- Controllo SQL in sola lettura sullo staging del 12 ottobre 2026: `catalog_search WHERE availability=1`, raggruppato per `merchant`, contiene 2.949 offerte Camden Rimini IT; zero valori vuoti in `aw_deep_link` e `merchant_deep_link`. Il rischio di fallback è nel codice, non una mancanza di link Awin osservata in questo catalogo. La presenza del campo non prova una vendita attribuita.
 - Nello stesso file, `buildClickParameters` prepara riferimenti per ricerca, prodotto e posizione. Vengono applicati soltanto nel percorso Link Builder abilitato e configurato; non basta che la funzione esista per avere report per prodotto.
 - Il collaudo descritto nell'issue [12](https://github.com/qesya/trovAI/issues/12) non ha verificato una conversione. L'errore DNS osservato su un link Awin va riprovato da una rete indipendente; non dimostra un problema generalizzato del partner.
 
