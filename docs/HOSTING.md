@@ -5,8 +5,10 @@ Supabase Free `TrovAI-web` esiste e la connessione SQL e' stata verificata.
 Le 10 tabelle sono inizializzate con RLS e senza accesso per anon/authenticated.
 I segreti DATABASE_URL e AWIN_FEED_DOWNLOAD_URL sono configurati nell'ambiente
 GitHub staging. Sono state verificate entrambe le connessioni pooler (5432 e 6543).
-Il collegamento del sito a questo database resta da completare; questa guida
-non attesta un rilascio in produzione.
+Il progetto Vercel personale `trov-ai` ha DATABASE_URL e DATABASE_SSL_CA configurate
+per questo database. Lo stato della verifica del rilascio su
+https://trov-ai-one.vercel.app e' tracciato nel [ticket #8](https://github.com/qesya/trovAI/issues/8).
+Questo sito resta staging anche se il target Vercel e' denominato Production.
 
 ## Componenti
 
@@ -73,7 +75,8 @@ Non copiare file di segreti nel repository.
 La configurazione `web/vercel.json` mantiene la regione Francoforte. Vercel Hobby
 consente solo uso personale non commerciale: un sito con attivita' affiliata
 richiede un piano adatto o un altro host. Supabase ospita il database, non il
-server Next.js. La scelta e l'attivazione dell'host web restano da confermare.
+server Next.js. Lo staging esistente usa il progetto Vercel personale `trov-ai`; prima di un
+lancio commerciale occorre confermare un piano di hosting compatibile.
 
 ## Fonti
 
