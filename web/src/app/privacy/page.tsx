@@ -25,7 +25,7 @@ export default async function Privacy() {
       <Section title="Dati trattati">
         <p>
           Il servizio tratta il testo delle ricerche, i filtri selezionati, le interazioni tecniche
-          necessarie alla sessione e gli elementi aggiunti temporaneamente a preferiti o carrello. Non
+          necessarie alla sessione e gli elementi aggiunti temporaneamente a preferiti o lista prodotti. Non
           inserire dati personali, dati sensibili o informazioni di pagamento nella chat.
         </p>
       </Section>
@@ -44,7 +44,7 @@ export default async function Privacy() {
       </Section>
       <Section title="Conservazione">
         <p>
-          Nella versione attuale chat, preferiti e carrello sono conservati nello stato temporaneo
+          Nella versione attuale chat, preferiti e lista prodotti sono conservati nello stato temporaneo
           della sessione del browser. Eventuali log tecnici del servizio pubblicato dovranno avere
           tempi di conservazione documentati e limitati.
         </p>

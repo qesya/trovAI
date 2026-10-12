@@ -75,7 +75,7 @@ export function Header() {
           <CountButton label="Preferiti" count={wishlist.length} onClick={() => setDrawer("wishlist")}>
             <HeartIcon />
           </CountButton>
-          <CountButton label="Carrello" count={cart.length} onClick={() => setDrawer("cart")}>
+          <CountButton label="Lista prodotti" count={cart.length} onClick={() => setDrawer("cart")}>
             <BagIcon />
           </CountButton>
           <button

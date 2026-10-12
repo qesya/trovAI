@@ -100,6 +100,7 @@ jobs:
             -d '{"query":"sneakers bianche","history":[]}' | tee search.json; echo
           # Stesso modello (stesso EAN) da due negozi: e' il confronto prezzi.
           python3 -c "import json; d=json.load(open('search.json')); assert len({p['merchant'] for p in d['products']}) == 2, d"
+          python3 scripts/check-size-filter.py
 
   secrets:
     name: Ricerca segreti (gitleaks)

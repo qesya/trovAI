@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useDialogFocus } from "@/lib/use-dialog-focus";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AFFILIATE_DISCLOSURE,
   AFFILIATE_DISCLOSURE_TITLE,
@@ -129,6 +130,9 @@ export function ShoppingChat({
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersPanel = useRef<HTMLDivElement>(null);
+  const closeFilters = useCallback(() => setFiltersOpen(false), []);
+  useDialogFocus(filtersPanel, filtersOpen, closeFilters);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastUserMsg = useRef<HTMLDivElement>(null);
@@ -292,10 +296,11 @@ export function ShoppingChat({
           <button
             type="button"
             aria-label="Chiudi"
+            tabIndex={-1}
             className="absolute inset-0 bg-wine-dark/30"
             onClick={() => setFiltersOpen(false)}
           />
-          <div className="animate-rise absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-3xl bg-cream p-5">
+          <div ref={filtersPanel} tabIndex={-1} className="animate-rise absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-3xl bg-cream p-5">
             <div className="mb-2 flex justify-end">
               <button
                 type="button"
