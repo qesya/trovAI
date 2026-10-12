@@ -150,9 +150,14 @@ export function ShoppingChat({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query, history, manualFilters }),
       });
-      const data = (await res.json()) as SearchResponse & { error?: string };
-      if (!res.ok) {
-        addMessages({ id: uid(), role: "assistant", content: data.error ?? "Errore imprevisto.", error: true });
+      const data = (await res.json().catch(() => ({}))) as Partial<SearchResponse> & { error?: string };
+      if (!res.ok || !data.message || !data.filters) {
+        addMessages({
+          id: uid(),
+          role: "assistant",
+          content: data.error ?? `Il servizio non risponde correttamente (errore ${res.status}). Riprova tra poco.`,
+          error: true,
+        });
         return;
       }
       addMessages({

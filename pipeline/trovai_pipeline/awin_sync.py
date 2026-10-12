@@ -243,7 +243,7 @@ def bootstrap_clean_catalog(*, limit: int, ai_limit: int, export_csv: Path | Non
     secrets = load_secrets()
     feed_url = str(secrets.get("AWIN_FEED_DOWNLOAD_URL", "")).strip()
     if not feed_url:
-        raise FeedSyncError("Aggiungi AWIN_FEED_DOWNLOAD_URL in .streamlit/secrets.toml.")
+        raise FeedSyncError("Aggiungi AWIN_FEED_DOWNLOAD_URL nel file .env (o come variabile d'ambiente).")
     settings = database_settings(project_root(), secrets)
     if settings.backend != "postgres":
         raise FeedSyncError("Configura PostgreSQL prima di importare il feed.")
@@ -391,7 +391,7 @@ def sync(*, apply: bool, ai_limit: int, export_csv: Path | None = None) -> Count
     secrets = load_secrets()
     feed_url = str(secrets.get("AWIN_FEED_DOWNLOAD_URL", "")).strip()
     if not feed_url:
-        raise FeedSyncError("Aggiungi AWIN_FEED_DOWNLOAD_URL in .streamlit/secrets.toml.")
+        raise FeedSyncError("Aggiungi AWIN_FEED_DOWNLOAD_URL nel file .env (o come variabile d'ambiente).")
     settings = database_settings(project_root(), secrets)
     if settings.backend != "postgres":
         raise FeedSyncError("Configura PostgreSQL prima di importare il feed.")

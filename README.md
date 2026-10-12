@@ -23,7 +23,7 @@ feed Awin ──> pipeline/ ──> PostgreSQL (vista catalog_search) ──> we
    ```bash
    python3 -m venv .venv && source .venv/bin/activate
    pip install -e "pipeline[dev]"
-   mkdir -p .streamlit && cp pipeline/secrets.example.toml .streamlit/secrets.toml   # oppure variabili d'ambiente (.env.example)
+   cp .env.example .env                                         # poi compila .env
    trovai-sync --apply --ai-limit 50                           # importa il feed e crea le tabelle
    ```
    Senza feed reale puoi partire dal feed demo (dati fittizi, nessuna chiamata Gemini):
@@ -50,6 +50,17 @@ La CI (`.github/workflows/ci.yml`) esegue a ogni push e pull request:
 - **sito:** lint, controllo dei tipi e build; poi avvia il sito su un database
   riempito dalla pipeline con un feed di prova e verifica `/api/health`;
 - **segreti:** gitleaks su tutto il repository.
+
+Il workflow **Aggiorna catalogo** (`.github/workflows/catalogo.yml`) importa il
+feed Awin nel database di produzione (Neon): parte ogni notte e si puo' lanciare a
+mano da *Actions → Aggiorna catalogo → Run workflow*. Richiede i segreti di
+repository `DATABASE_URL` (stringa Neon *unpooled*), `AWIN_FEED_DOWNLOAD_URL` e,
+facoltativo, `GEMINI_API_KEY`.
+
+## Deploy
+
+Il sito (`web/`) e' pubblicato su Vercel a ogni push su `main`; le funzioni girano
+a Francoforte (`web/vercel.json`, regione `fra1`), vicino al database Neon.
 
 ## Link affiliati e click reference
 

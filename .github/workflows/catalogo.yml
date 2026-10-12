@@ -1,0 +1,78 @@
+name: Aggiorna catalogo
+
+# Scarica il feed Awin, lo pulisce e aggiorna il catalogo PostgreSQL (Neon) letto dal sito.
+# Segreti richiesti (Settings -> Secrets and variables -> Actions):
+#   DATABASE_URL            stringa Neon *unpooled* (postgresql://...)
+#   AWIN_FEED_DOWNLOAD_URL  URL privato del feed Awin
+#   GEMINI_API_KEY          facoltativo: senza, nessun arricchimento con Gemini
+
+on:
+  workflow_dispatch:
+    inputs:
+      ai_limit:
+        description: "Massimo prodotti ambigui inviati a Gemini (0 = nessuno)"
+        default: "100"
+        required: true
+      bootstrap_limit:
+        description: "Solo primo import: numero di prodotti del catalogo iniziale (vuoto = import completo)"
+        default: ""
+        required: false
+      replace_catalog:
+        description: "Con bootstrap: svuota il catalogo prima di importare"
+        type: boolean
+        default: false
+  schedule:
+    - cron: "17 3 * * *" # ogni notte alle 03:17 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: catalogo
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Importa feed Awin
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: pipeline
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AWIN_FEED_DOWNLOAD_URL: ${{ secrets.AWIN_FEED_DOWNLOAD_URL }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      AI_LIMIT: ${{ inputs.ai_limit || '200' }}
+      BOOTSTRAP_LIMIT: ${{ inputs.bootstrap_limit }}
+      REPLACE_CATALOG: ${{ inputs.replace_catalog }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pipeline/pyproject.toml
+      - name: Installa la pipeline
+        run: pip install -e .
+      - name: Controlla i segreti
+        run: |
+          missing=""
+          [ -n "$DATABASE_URL" ] || missing="$missing DATABASE_URL"
+          [ -n "$AWIN_FEED_DOWNLOAD_URL" ] || missing="$missing AWIN_FEED_DOWNLOAD_URL"
+          if [ -n "$missing" ]; then
+            echo "::error::Segreti mancanti:$missing (Settings -> Secrets and variables -> Actions)"
+            exit 1
+          fi
+          [ -n "$GEMINI_API_KEY" ] || echo "::warning::GEMINI_API_KEY assente: import senza arricchimento Gemini."
+      - name: Importa e aggiorna il catalogo
+        run: |
+          case "$AI_LIMIT" in ''|*[!0-9]*) echo "::error::ai_limit deve essere un numero"; exit 1;; esac
+          args=(--apply --ai-limit "$AI_LIMIT")
+          if [ -n "$BOOTSTRAP_LIMIT" ]; then
+            case "$BOOTSTRAP_LIMIT" in *[!0-9]*) echo "::error::bootstrap_limit deve essere un numero"; exit 1;; esac
+            args+=(--bootstrap-limit "$BOOTSTRAP_LIMIT")
+            [ "$REPLACE_CATALOG" = "true" ] && args+=(--replace-catalog)
+          fi
+          echo "trovai-sync ${args[*]}"
+          trovai-sync "${args[@]}"
