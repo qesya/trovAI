@@ -29,10 +29,10 @@ async function catalogOptions() {
     const sizes = [
       ...new Set(sizeRows.flatMap((r) => (catalogSize(r.size, r.title) ?? "").split(",").map((s) => s.trim()).filter(Boolean))),
     ].sort(sortSizes);
-    return { merchants, sizes, productCount: count?.n ?? 0 };
+    return { merchants, sizes, offerCount: count?.n ?? 0 };
   } catch (error) {
     console.error("Database non raggiungibile", error);
-    return { merchants: [], sizes: [], productCount: 0 };
+    return { merchants: [], sizes: [], offerCount: 0 };
   }
 }
 

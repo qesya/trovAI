@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { DEMO_DISCLOSURE } from "@/lib/disclosures";
+import { catalogDate } from "@/lib/catalog-date";
 import { formatPrice } from "@/lib/money";
 import type { ProductResult, SavedItem } from "@/lib/types";
 import { BagIcon, ExternalIcon, HeartIcon, ThumbDownIcon, ThumbUpIcon } from "./icons";
@@ -19,6 +20,7 @@ export function ProductCard({ product, index }: { product: ProductResult; index:
   const current = onSale ? product.sale_price! : product.price;
   const discount = onSale ? Math.round((1 - current / product.price) * 100) : 0;
   const isAwin = product.source === "awin";
+  const updated = catalogDate(product.source_updated_at);
   const inWishlist = wishlist.some((i) => i.id === product.id);
   const inCart = cart.some((i) => i.id === product.id);
 
@@ -156,7 +158,9 @@ export function ProductCard({ product, index }: { product: ProductResult; index:
             {isAwin
               ? "Link affiliato: potremmo ricevere una commissione. L'acquisto si conclude sul sito del negozio."
               : DEMO_DISCLOSURE}
-            {isAwin && product.source_updated_at && ` Aggiornato: ${product.source_updated_at}.`}
+            {isAwin && updated && (
+              <> Aggiornato: <time dateTime={updated.iso}>{updated.label}</time> (ora italiana).</>
+            )}
           </p>
         </div>
 
