@@ -247,7 +247,7 @@ export function ShoppingChat({
           }}
           className="sticky bottom-0 bg-gradient-to-t from-cream via-cream to-cream/0 pb-4 pt-6"
         >
-          <div className="flex items-end gap-2 rounded-3xl border border-line bg-white p-2 shadow-lg shadow-wine/5 focus-within:border-wine">
+          <div className="search-composer flex items-end gap-2 rounded-3xl border border-line bg-white p-2 shadow-lg shadow-wine/5 focus-within:border-wine">
             <button
               type="button"
               onClick={() => setFiltersOpen(true)}

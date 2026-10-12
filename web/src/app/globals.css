@@ -36,6 +36,16 @@ body {
   outline-offset: 2px;
 }
 
+/* The rounded composer carries focus instead of the rectangular textarea. */
+.search-composer:focus-within {
+  border-color: var(--color-wine);
+  box-shadow: 0 0 0 3px var(--color-wine-soft), 0 8px 24px rgb(104 29 53 / 8%);
+}
+
+.search-composer textarea:focus-visible {
+  outline: none;
+}
+
 @keyframes rise {
   from {
     opacity: 0;
