@@ -19,10 +19,14 @@
 
 ## Stato di rilascio
 
-- Pubblicazione/CI/merge: in corso; verificare lo stato aggiornato su GitHub PR #4 e #5.
+- Pubblicazione verificata con `git ls-remote`: i rami `codex/hosting-streamlit-cleanup`
+  e `feat/catalogo-incrementale` sono presenti sul remoto.
+- Esiti CI e merge: fonte aggiornata [PR #4](https://github.com/qesya/trovAI/pull/4)
+  e [PR #5](https://github.com/qesya/trovAI/pull/5); questo documento registra le verifiche locali.
 - Supabase: n/a — progetto remoto non configurato; nessun dato reale importato.
 - Host Next.js: n/a — piano da confermare, Hobby Vercel non adatto all'uso commerciale.
-- Revisione dipendenze di sviluppo: aperta; nessun downgrade automatico applicato.
+- Revisione dipendenze di sviluppo: [ticket #6](https://github.com/qesya/trovAI/issues/6);
+  nessun downgrade automatico applicato.
 
 Il caricamento TOML storico e' rimosso: migrare le impostazioni in `.env` o nelle
 variabili d'ambiente prima del deploy. La guida `docs/HOSTING.md` distingue le
