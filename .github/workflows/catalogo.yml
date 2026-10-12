@@ -11,7 +11,7 @@ on:
     inputs:
       ai_limit:
         description: "Massimo prodotti ambigui inviati a Gemini (0 = nessuno)"
-        default: "100"
+        default: "0"
         required: true
       bootstrap_limit:
         description: "Solo primo import: numero di prodotti del catalogo iniziale (vuoto = import completo)"
@@ -28,12 +28,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: catalogo
+  group: catalogo-staging
   cancel-in-progress: false
 
 jobs:
   sync:
-    name: Importa feed Awin
+    name: Importa feed Awin (staging)
+    environment: staging
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
@@ -43,7 +44,7 @@ jobs:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
       AWIN_FEED_DOWNLOAD_URL: ${{ secrets.AWIN_FEED_DOWNLOAD_URL }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-      AI_LIMIT: ${{ inputs.ai_limit || '200' }}
+      AI_LIMIT: ${{ inputs.ai_limit || '0' }}
       BOOTSTRAP_LIMIT: ${{ inputs.bootstrap_limit }}
       REPLACE_CATALOG: ${{ inputs.replace_catalog }}
     steps:
@@ -65,6 +66,8 @@ jobs:
             exit 1
           fi
           [ -n "$GEMINI_API_KEY" ] || echo "::warning::GEMINI_API_KEY assente: import senza arricchimento Gemini."
+      - name: Protegge il catalogo dalla Data API
+        run: python -m trovai_pipeline.private_catalog --apply
       - name: Importa e aggiorna il catalogo
         run: |
           case "$AI_LIMIT" in ''|*[!0-9]*) echo "::error::ai_limit deve essere un numero"; exit 1;; esac

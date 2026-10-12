@@ -1,7 +1,9 @@
 # Pubblicare TrovAI con Supabase
 
-Configurazione proposta il 12 ottobre 2026. Nessun database o deploy remoto e'
-stato creato o verificato da questo documento.
+Configurazione dello **staging**, aggiornata il 12 ottobre 2026. Il progetto
+Supabase Free `TrovAI-web` esiste e la connessione SQL e' stata verificata.
+L'inizializzazione e il collegamento ai servizi richiedono la configurazione
+dei segreti; questa guida non attesta un rilascio in produzione.
 
 ## Componenti
 
@@ -33,15 +35,19 @@ il Transaction pooler non e' adatto. Il client web `pg` non usa prepared stateme
 con nome. Non usare una chiave `anon` o `service_role` al posto della password SQL.
 Mantieni tutte le credenziali nell'ambiente server, mai in `NEXT_PUBLIC_*`.
 
-TrovAI usa SQL dal backend e non necessita della Data API di Supabase. Disabilita
-la Data API prima di importare: le tabelle create via SQL non hanno policy RLS
-configurate per un accesso diretto dal browser.
+TrovAI usa SQL dal backend. La Data API resta attiva per scelta dell'utente.
+Prima dell'import esegui `python -m trovai_pipeline.private_catalog --apply`:
+abilita RLS sulle tabelle del catalogo e revoca l'accesso a PUBLIC, anon e
+authenticated. Non vengono create policy per client browser. Le viste usano
+`security_invoker`; il ruolo proprietario resta utilizzabile dal backend.
+Le credenziali SQL restano esclusivamente nei segreti server.
 
 ## Configurazione e primo import
 
-1. Configura nei segreti GitHub Actions `DATABASE_URL` (sessione),
+1. Configura nei segreti dell'ambiente GitHub Actions **staging** `DATABASE_URL` (sessione),
    `AWIN_FEED_DOWNLOAD_URL` e, se desiderato, `GEMINI_API_KEY`.
-2. Avvia **Actions → Aggiorna catalogo → Run workflow** con `ai_limit=0`
+2. Il workflow usa l'ambiente `staging` e un budget IA predefinito di zero.
+   Avvia **Actions → Aggiorna catalogo → Run workflow** con `ai_limit=0`
    per verificare prima il feed senza costi Gemini. Lascia vuoti i parametri
    bootstrap ed evita `replace_catalog` su dati esistenti.
 3. Controlla l'esito e `feed_import_runs`; verifica prezzi, taglie e disponibilita'.
