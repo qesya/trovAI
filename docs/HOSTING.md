@@ -36,6 +36,9 @@ Codifica i caratteri speciali della password nell'URL e abilita SSL.
 La pipeline usa un advisory lock PostgreSQL di sessione attraverso piu' commit:
 il Transaction pooler non e' adatto. Il client web `pg` non usa prepared statement
 con nome. Non usare una chiave `anon` o `service_role` al posto della password SQL.
+Per il backend Node configura anche `DATABASE_SSL_CA` con il certificato PEM
+scaricato da Database Settings → SSL configuration. Il client verifica CA e
+nome host; non disabilitare la verifica TLS.
 Mantieni tutte le credenziali nell'ambiente server, mai in `NEXT_PUBLIC_*`.
 
 TrovAI usa SQL dal backend. La Data API resta attiva per scelta dell'utente.

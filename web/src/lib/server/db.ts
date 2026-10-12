@@ -1,6 +1,7 @@
 import "server-only";
 import { Pool, types, type QueryResultRow } from "pg";
 import { getSetting } from "./config";
+import { databasePoolConfig } from "./database-pool-config";
 
 // PostgreSQL restituisce NUMERIC e BIGINT come stringhe: prezzi e ID servono come numeri.
 types.setTypeParser(types.builtins.NUMERIC, (value) => Number.parseFloat(value));
@@ -16,7 +17,7 @@ export function getPool(): Pool {
   if (!pool) {
     const connectionString = getSetting("DATABASE_URL");
     pool = connectionString
-      ? new Pool({ connectionString, max: 5 })
+      ? new Pool(databasePoolConfig(connectionString, getSetting("DATABASE_SSL_CA")))
       : new Pool({
           host: getSetting("POSTGRES_HOST", "localhost"),
           port: Number(getSetting("POSTGRES_PORT", "5432")),
