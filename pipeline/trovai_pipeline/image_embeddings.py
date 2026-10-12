@@ -1,6 +1,6 @@
 """Test controllato: crea embedding visivi per sole 10 immagini del catalogo.
 
-Non modifica prodotti, offerte o schermate Streamlit. I vettori sono salvati
+Non modifica prodotti, offerte o interfaccia web. I vettori sono salvati
 in una tabella separata, cosi il test puo essere verificato o eliminato senza
 toccare il catalogo Awin.
 """

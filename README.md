@@ -18,7 +18,7 @@ feed Awin ──> pipeline/ ──> PostgreSQL (vista catalog_search) ──> we
 
 ## Avvio in locale
 
-1. **Database:** un PostgreSQL raggiungibile (locale o Neon/Supabase).
+1. **Database:** un PostgreSQL raggiungibile (locale o Supabase).
 2. **Pipeline:** dalla radice del repository
    ```bash
    python3 -m venv .venv && source .venv/bin/activate
@@ -52,15 +52,20 @@ La CI (`.github/workflows/ci.yml`) esegue a ogni push e pull request:
 - **segreti:** gitleaks su tutto il repository.
 
 Il workflow **Aggiorna catalogo** (`.github/workflows/catalogo.yml`) importa il
-feed Awin nel database di produzione (Neon): parte ogni notte e si puo' lanciare a
+feed Awin nel database PostgreSQL configurato: parte ogni notte e si puo' lanciare a
 mano da *Actions → Aggiorna catalogo → Run workflow*. Richiede i segreti di
-repository `DATABASE_URL` (stringa Neon *unpooled*), `AWIN_FEED_DOWNLOAD_URL` e,
+repository `DATABASE_URL` (su Supabase: Session pooler, porta 5432), `AWIN_FEED_DOWNLOAD_URL` e,
 facoltativo, `GEMINI_API_KEY`.
 
 ## Deploy
 
-Il sito (`web/`) e' pubblicato su Vercel a ogni push su `main`; le funzioni girano
-a Francoforte (`web/vercel.json`, regione `fra1`), vicino al database Neon.
+Il backend HTTP e' incluso nelle API di Next.js (`web/src/app/api/`); la pipeline
+Python viene eseguita da GitHub Actions. Non serve un server Python permanente.
+Il database puo' essere Supabase o un altro PostgreSQL: nessun SDK proprietario.
+
+Per Supabase, limiti gratuiti, connessioni e verifica del deploy, segui
+[`docs/HOSTING.md`](docs/HOSTING.md). La configurazione Vercel esistente seleziona
+Francoforte (`web/vercel.json`, regione `fra1`); non dimostra che un deploy sia attivo.
 
 ## Link affiliati e click reference
 

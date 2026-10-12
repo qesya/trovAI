@@ -43,6 +43,7 @@ from trovai_pipeline.feed_cleaner import (
 from trovai_pipeline.awin_sync import (
     download_rows,
     feed_enrichment_settings,
+    is_available,
 )
 
 
@@ -160,7 +161,7 @@ def run_test(*, apply: bool, limit: int, seed: int) -> dict[str, int]:
         for raw in rows:
             stats["received"] += 1
             product = clean_row(raw)
-            if not product or str(raw.get("availability", "")).strip().lower() != "in_stock" or not product.image_link:
+            if not product or not is_available(raw) or not product.image_link:
                 continue
             candidates.append(product)
     stats["eligible"] = len(candidates)

@@ -10,46 +10,16 @@ import csv
 
 import pytest
 
+from conftest import query
+
 from trovai_pipeline import awin_sync, pipeline, title_review
 from trovai_pipeline.database import connect_database
 
 pytestmark = pytest.mark.postgres
 
-@pytest.fixture
-def database(postgres_settings, monkeypatch):
-    monkeypatch.setenv("POSTGRES_HOST", postgres_settings.host)
-    monkeypatch.setenv("POSTGRES_PORT", str(postgres_settings.port))
-    monkeypatch.setenv("POSTGRES_DATABASE", postgres_settings.database)
-    monkeypatch.setenv("POSTGRES_USER", postgres_settings.user)
-    monkeypatch.setenv("POSTGRES_PASSWORD", postgres_settings.password or "test")
-    with connect_database(postgres_settings) as conn:
-        conn.execute("DROP SCHEMA public CASCADE")
-        conn.execute("CREATE SCHEMA public")  # database vuoto: la pipeline crea tutto
-    return postgres_settings
-
-
-@pytest.fixture
-def feed(tmp_path, monkeypatch, make_row):
-    path = tmp_path / "feed.csv"
-
-    def publish(rows):
-        with path.open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=sorted({key for row in rows for key in row}))
-            writer.writeheader()
-            writer.writerows(rows)
-        monkeypatch.setenv("AWIN_FEED_DOWNLOAD_URL", path.as_uri())
-
-    return publish
-
-
 def jordan(make_row, advertiser_id, product_id, price):
     return make_row(advertiser_id=advertiser_id, advertiser_name=f"negozio {advertiser_id}", id=product_id,
                     title="Nike Air Jordan 1 Low Bred Toe - 42", brand="Nike", price=price, gtin="0195866123456")
-
-
-def query(settings, sql, params=None):
-    with connect_database(settings) as conn:
-        return conn.execute(sql, params).fetchall()
 
 
 def test_sync_merges_same_ean_and_tracks_availability(database, feed, make_row):
@@ -77,7 +47,8 @@ def test_sync_merges_same_ean_and_tracks_availability(database, feed, make_row):
     awin_sync.sync(apply=True, ai_limit=0)
     availability = dict(query(database, "SELECT source_product_id, availability FROM merchant_offers"))
     assert availability == {"a-1": True, "b-1": True, "a-2": False}
-    assert query(database, "SELECT COUNT(*) FROM prodotti WHERE source = 'awin'") == [(2,)]
+    # Nessuna cancellazione: la riga resta (con i suoi dati) ma non e' disponibile.
+    assert query(database, "SELECT COUNT(*), SUM(availability) FROM prodotti WHERE source = 'awin'") == [(3, 2)]
     assert float(query(database, "SELECT price FROM merchant_offers WHERE source_product_id = 'a-1'")[0][0]) == pytest.approx(179.9)
     runs = query(database, "SELECT status, imported_count FROM feed_import_runs ORDER BY started_at")
     assert [run[0] for run in runs] == ["success", "success"]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import os
 from pathlib import Path
 from typing import Any
@@ -51,3 +52,42 @@ def postgres_settings():
     from trovai_pipeline.database import database_settings
 
     return database_settings(Path("."), {"DATABASE_URL": url})
+
+
+# --- PostgreSQL di test (fixture condivise dai test di integrazione) --------------------
+
+@pytest.fixture
+def database(postgres_settings, monkeypatch):
+    monkeypatch.setenv("POSTGRES_HOST", postgres_settings.host)
+    monkeypatch.setenv("POSTGRES_PORT", str(postgres_settings.port))
+    monkeypatch.setenv("POSTGRES_DATABASE", postgres_settings.database)
+    monkeypatch.setenv("POSTGRES_USER", postgres_settings.user)
+    monkeypatch.setenv("POSTGRES_PASSWORD", postgres_settings.password or "test")
+    from trovai_pipeline.database import connect_database
+
+    with connect_database(postgres_settings) as conn:
+        conn.execute("DROP SCHEMA public CASCADE")
+        conn.execute("CREATE SCHEMA public")  # database vuoto: la pipeline crea tutto
+    return postgres_settings
+
+
+@pytest.fixture
+def feed(tmp_path, monkeypatch, make_row):
+    path = tmp_path / "feed.csv"
+
+    def publish(rows):
+        with path.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=sorted({key for row in rows for key in row}))
+            writer.writeheader()
+            writer.writerows(rows)
+        monkeypatch.setenv("AWIN_FEED_DOWNLOAD_URL", path.as_uri())
+
+    return publish
+
+
+
+def query(settings, sql, params=None):
+    from trovai_pipeline.database import connect_database
+
+    with connect_database(settings) as conn:
+        return conn.execute(sql, params).fetchall()

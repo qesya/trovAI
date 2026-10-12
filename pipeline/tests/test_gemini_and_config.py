@@ -81,15 +81,14 @@ def test_load_secrets_without_file_or_env_is_empty():
     assert config.load_secrets() == {}
 
 
-def test_load_secrets_reads_toml(tmp_path):
+def test_legacy_secrets_are_ignored(tmp_path):
     (tmp_path / ".streamlit").mkdir()
     (tmp_path / ".streamlit" / "secrets.toml").write_text('POSTGRES_HOST = "db.local"\nALTRO = "x"\n')
-    assert config.load_secrets() == {"POSTGRES_HOST": "db.local", "ALTRO": "x"}
+    assert config.load_secrets() == {}
 
 
-def test_env_overrides_toml(tmp_path, monkeypatch):
-    (tmp_path / ".streamlit").mkdir()
-    (tmp_path / ".streamlit" / "secrets.toml").write_text('POSTGRES_HOST = "db.local"\n')
+def test_env_overrides_file(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("POSTGRES_HOST=db.local\n")
     monkeypatch.setenv("POSTGRES_HOST", "db.cloud")
     monkeypatch.setenv("GEMINI_FEED_API_KEY", "  chiave  ")
     monkeypatch.setenv("PATH_NON_PERTINENTE", "x")
@@ -100,37 +99,34 @@ def test_env_overrides_toml(tmp_path, monkeypatch):
 
 
 def test_empty_env_value_does_not_override(tmp_path, monkeypatch):
-    (tmp_path / ".streamlit").mkdir()
-    (tmp_path / ".streamlit" / "secrets.toml").write_text('POSTGRES_HOST = "db.local"\n')
+    (tmp_path / ".env").write_text("POSTGRES_HOST=db.local\n")
     monkeypatch.setenv("POSTGRES_HOST", "")
     assert config.load_secrets()["POSTGRES_HOST"] == "db.local"
 
 
-def test_custom_secrets_file(tmp_path, monkeypatch):
-    custom = tmp_path / "altrove.toml"
-    custom.write_text('AWIN_FEED_DOWNLOAD_URL = "https://feed"\n')
-    monkeypatch.setenv("TROVAI_SECRETS_FILE", str(custom))
+def test_custom_env_file(tmp_path, monkeypatch):
+    custom = tmp_path / "altrove.env"
+    custom.write_text("AWIN_FEED_DOWNLOAD_URL=https://feed\n")
+    monkeypatch.setenv("TROVAI_ENV_FILE", str(custom))
     assert config.load_secrets()["AWIN_FEED_DOWNLOAD_URL"] == "https://feed"
 
 
 def test_load_secrets_reads_env_file(tmp_path):
     (tmp_path / ".env").write_text(
         "# commento\n"
-        "export DATABASE_URL='postgresql://u:p@db.example/neondb?sslmode=require'\n"
+        "export DATABASE_URL='postgresql://u:p@db.example/catalog?sslmode=require'\n"
         'GEMINI_API_KEY="abc"\n'
         "POSTGRES_PORT=5432  # commento in linea\n"
         "VUOTA=\n"
     )
     values = config.load_secrets()
-    assert values["DATABASE_URL"] == "postgresql://u:p@db.example/neondb?sslmode=require"
+    assert values["DATABASE_URL"] == "postgresql://u:p@db.example/catalog?sslmode=require"
     assert values["GEMINI_API_KEY"] == "abc"
     assert values["POSTGRES_PORT"] == "5432"
     assert "VUOTA" not in values
 
 
-def test_env_file_overrides_toml_and_env_overrides_env_file(tmp_path, monkeypatch):
-    (tmp_path / ".streamlit").mkdir()
-    (tmp_path / ".streamlit" / "secrets.toml").write_text('POSTGRES_HOST = "toml"\nPOSTGRES_USER = "toml"\n')
+def test_env_overrides_env_file(tmp_path, monkeypatch):
     (tmp_path / ".env").write_text("POSTGRES_HOST=dotenv\nPOSTGRES_USER=dotenv\n")
     monkeypatch.setenv("POSTGRES_USER", "ambiente")
     values = config.load_secrets()
@@ -144,13 +140,13 @@ def test_database_url_remote_requires_ssl(tmp_path):
     from trovai_pipeline.database import database_settings
 
     settings = database_settings(
-        tmp_path, {"DATABASE_URL": "postgresql://neon%40user:p%2Fss@ep-x.eu-central-1.aws.neon.tech/neondb"}
+        tmp_path, {"DATABASE_URL": "postgresql://test%40user:p%2Fss@db.example/catalog"}
     )
     assert settings.backend == "postgres"
-    assert settings.host == "ep-x.eu-central-1.aws.neon.tech"
+    assert settings.host == "db.example"
     assert settings.port == 5432
-    assert settings.database == "neondb"
-    assert settings.user == "neon@user"
+    assert settings.database == "catalog"
+    assert settings.user == "test@user"
     assert settings.password == "p/ss"
     assert settings.sslmode == "require"
 
