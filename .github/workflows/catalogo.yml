@@ -1,8 +1,8 @@
 name: Aggiorna catalogo
 
-# Scarica il feed Awin, lo pulisce e aggiorna il catalogo PostgreSQL (Neon) letto dal sito.
+# Scarica il feed Awin, lo pulisce e aggiorna il catalogo PostgreSQL letto dal sito.
 # Segreti richiesti (Settings -> Secrets and variables -> Actions):
-#   DATABASE_URL            stringa Neon *unpooled* (postgresql://...)
+#   DATABASE_URL            connessione di sessione (Supabase: Session pooler, porta 5432)
 #   AWIN_FEED_DOWNLOAD_URL  URL privato del feed Awin
 #   GEMINI_API_KEY          facoltativo: senza, nessun arricchimento con Gemini
 

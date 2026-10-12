@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* Palette del brand TrovAI (assets/brand/README.md, .streamlit/config.toml). */
+/* Palette del brand TrovAI (assets/brand/README.md). */
 @theme {
   --color-wine: #681d35;
   --color-wine-dark: #3a1020;

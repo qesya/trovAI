@@ -123,7 +123,7 @@ def database_settings(
 def _settings_from_url(url: str) -> DatabaseSettings:
     """Converte ``postgresql://utente:password@host:porta/db?sslmode=...``.
 
-    Gli host remoti (Neon, Supabase, ...) usano ``sslmode=require`` se l'URL non
+    Gli host remoti (Supabase o altri provider) usano ``sslmode=require`` se l'URL non
     indica diversamente; ``localhost`` resta senza SSL obbligatorio.
     """
     parts = urlsplit(url)

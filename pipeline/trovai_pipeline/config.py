@@ -2,9 +2,7 @@
 
 Ordine di priorita' (dal piu' forte):
 1. variabili d'ambiente (GitHub Actions, server, shell);
-2. ``.env`` nella cartella del progetto (o ``TROVAI_ENV_FILE``), se esiste;
-3. ``.streamlit/secrets.toml`` (o ``TROVAI_SECRETS_FILE``): formato storico,
-   ancora letto per compatibilita' con le installazioni esistenti.
+2. ``.env`` nella cartella del progetto (o ``TROVAI_ENV_FILE``), se esiste.
 
 La cartella del progetto e' ``TROVAI_HOME`` se impostata, altrimenti la
 cartella da cui si lancia il comando. I valori non vengono mai stampati.
@@ -13,7 +11,6 @@ cartella da cui si lancia il comando. I valori non vengono mai stampati.
 from __future__ import annotations
 
 import os
-import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -40,11 +37,6 @@ KNOWN_KEYS = (
 
 def project_root() -> Path:
     return Path(os.environ.get("TROVAI_HOME") or Path.cwd()).resolve()
-
-
-def secrets_path() -> Path:
-    override = os.environ.get("TROVAI_SECRETS_FILE")
-    return Path(override).expanduser() if override else project_root() / ".streamlit" / "secrets.toml"
 
 
 def env_file_path() -> Path:
@@ -74,12 +66,8 @@ def parse_env_file(text: str) -> dict[str, str]:
 
 
 def load_secrets() -> dict[str, Any]:
-    """Unisce secrets.toml storico, ``.env`` e variabili d'ambiente."""
+    """Unisce ``.env`` e variabili d'ambiente."""
     values: dict[str, Any] = {}
-    path = secrets_path()
-    if path.is_file():
-        with path.open("rb") as handle:
-            values.update(tomllib.load(handle))
     env_path = env_file_path()
     if env_path.is_file():
         values.update(parse_env_file(env_path.read_text(encoding="utf-8")))

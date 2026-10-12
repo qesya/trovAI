@@ -121,5 +121,5 @@ conta le chiamate):
 
 L'impronta dei contenuti è cambiata (la taglia ne è uscita), quindi alla prima
 importazione dopo l'aggiornamento i prodotti che richiedono l'IA non trovano la
-vecchia cache e vengono rielaborati una volta, entro `--ai-limit`. Su Neon il
-catalogo è ancora vuoto, quindi non cambia nulla.
+vecchia cache e vengono rielaborati una volta, entro `--ai-limit`. Verifica lo
+stato del database scelto prima del rilascio; su un catalogo vuoto non serve migrare dati.

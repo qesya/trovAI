@@ -44,12 +44,14 @@ Due modi, anche combinati (le variabili d'ambiente vincono):
 2. **In CI o su un server:** imposta le stesse variabili nell'ambiente
    (su GitHub: *Settings → Secrets and variables → Actions*).
 
-Per il database basta `DATABASE_URL` (per Neon usa la stringa *unpooled*; per gli
-host remoti si attiva `sslmode=require` se l'URL non dice altro). In alternativa
-valgono le cinque variabili `POSTGRES_*`. Un vecchio `.streamlit/secrets.toml`
-viene ancora letto, con priorita' piu' bassa di `.env`.
+Per il database basta `DATABASE_URL`: su Supabase usa il **Session pooler**
+(porta 5432), necessario per mantenere il lock di sessione tra i commit. Non usare
+il Transaction pooler nella pipeline. Per gli host remoti si attiva
+`sslmode=require` se l'URL non dice altro. In alternativa valgono le cinque
+variabili `POSTGRES_*`. `.env` e' escluso da Git.
 
-`.env` e `.streamlit/secrets.toml` sono esclusi da Git tramite `.gitignore`.
+La configurazione TOML storica non viene piu' letta: trasferisci i valori nel
+file `.env` o nelle variabili d'ambiente prima di aggiornare l'installazione.
 
 ## Comandi
 
@@ -97,13 +99,12 @@ PostgreSQL dedicato, insieme a `ruff` e alla ricerca di chiavi con gitleaks.
 
 - Codice riorganizzato nel pacchetto `trovai_pipeline`, installabile con comandi `trovai-*`.
 - La pipeline crea da sola la tabella `prodotti` (prima la creava l'app
-  Streamlit): un database vuoto viene inizializzato completamente. Su un
+  storica): un database vuoto viene inizializzato completamente. Su un
   database esistente aggiunge solo le colonne mancanti.
 - Schema `prodotti` allineato a quello originale dell'app (`awin_db.py`):
   stesse colonne e, su un database nuovo, stessi vincoli.
-- La pipeline non dipende da Streamlit; il sito e' in `web/` (Next.js) e legge
-  la vista `catalog_search`. `.streamlit/secrets.toml` resta leggibile per
-  comodita' in locale, accanto alle variabili d'ambiente.
+- Il sito e' in `web/` (Next.js) e legge la vista `catalog_search`. La pipeline
+  usa `.env` e variabili d'ambiente; il vecchio formato TOML e' stato rimosso.
 - Chiavi lette anche da variabili d'ambiente (necessario per CI e server).
 - Gestione quota Gemini unificata in `gemini.py`; l'import iniziale ora rispetta
   il ritmo del Free Tier e ritenta i 429.

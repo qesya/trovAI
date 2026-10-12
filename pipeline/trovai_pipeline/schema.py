@@ -1,7 +1,7 @@
 """Tabella ``prodotti``: una riga per offerta del feed, base del catalogo.
 
-In origine la creava l'app Streamlit; ora e' la pipeline a crearla, cosi' un
-database nuovo (CI, Neon, un altro PC) nasce completo. Su un database gia'
+La pipeline crea lo schema, cosi' un
+database nuovo (CI, Supabase, un altro PC) nasce completo. Su un database gia'
 esistente non cambia nulla: aggiunge solo le colonne eventualmente mancanti.
 """
 

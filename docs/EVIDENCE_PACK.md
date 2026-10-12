@@ -12,10 +12,10 @@ Raccogliere questi elementi dopo il deploy e conservarli con data e versione.
 
 ## Evidenze tecniche
 
-- [ ] Output di `python -m unittest discover -s tests -v`.
-- [ ] Output di `python healthcheck.py` con `ready: true`.
-- [ ] Output di `python awin_readiness.py` per il gate pertinente.
-- [ ] Risultato dell'ultimo sync nella tabella `feed_sync`.
+- [ ] Output di `cd pipeline && pytest -q` con PostgreSQL di test dedicato.
+- [ ] Output di `GET /api/health` sul sito pubblicato con `ok: true`.
+- [ ] Checklist `PRODUCTION_CHECKLIST.md` verificata sull'ambiente pubblicato.
+- [ ] Risultato dell'ultimo sync nella tabella `feed_import_runs`.
 - [ ] Evidenza che tutti i prodotti Awin attivi hanno `aw_deep_link`.
 - [ ] Click di prova visibile nel reporting con `clickref`, `clickref2`, `clickref3`.
 

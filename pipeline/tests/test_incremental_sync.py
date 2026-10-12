@@ -229,3 +229,42 @@ def test_ai_jobs_are_claimed_only_once(database):
         incremental.finish_ai_jobs(first, done=["h1"], failed=["h2"], error="boom")
         first.commit()
         assert incremental.claim_ai_jobs(second, ["h1", "h2"], "run-b", "modello") == {"h2"}
+
+
+def test_real_awin_feed_columns_survive_incremental_updates(run, feed, make_row, database):
+    row = make_row(in_stock="1", **{"Fashion:size": "M", "Fashion:material": "cotone"})
+    del row["availability"]
+    feed([row])
+    assert run(FakeGemini())["new"] == 1
+    assert query(database, "SELECT size, availability FROM catalog_search") == [("m", 1)]
+    row["Fashion:size"] = "L"
+    row["price"] = "45.00"
+    feed([row])
+    gemini = FakeGemini()
+    assert run(gemini)["updated"] == 1
+    assert gemini.calls == 0
+    assert query(database, "SELECT size, availability FROM catalog_search") == [("l", 1)]
+    row["in_stock"] = "0"
+    feed([row])
+    assert run(FakeGemini())["deactivated"] == 1
+    assert query(database, "SELECT availability FROM catalog_search") == [(0,)]
+
+
+def test_abandoned_ai_job_is_retried_for_unchanged_product(run, feed, make_row, database):
+    from datetime import datetime, timedelta, timezone
+
+    feed(catalog(make_row, count=1))
+    run(FakeGemini(), ai_limit=0)
+    with connect_database(database) as conn:
+        conn.execute("UPDATE feed_ai_jobs SET status = 'running', updated_at = ?",
+                     (datetime.now(timezone.utc).isoformat(),))
+    fresh = FakeGemini()
+    run(fresh)
+    assert fresh.calls == 0  # a live claim must not be stolen
+    with connect_database(database) as conn:
+        conn.execute("UPDATE feed_ai_jobs SET updated_at = ?",
+                     ((datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),))
+    recovered = FakeGemini()
+    assert run(recovered)["ai_retry"] == 1
+    assert recovered.calls == 1
+    assert query(database, "SELECT status FROM feed_ai_jobs") == [("done",)]

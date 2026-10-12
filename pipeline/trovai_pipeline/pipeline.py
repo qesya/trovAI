@@ -1,6 +1,6 @@
 """Pipeline scalabile per i feed Awin di TrovAI.
 
-Non viene eseguito dall'app Streamlit. E' lo strumento da usare manualmente
+E' lo strumento da usare manualmente
 quando si vuole costruire o ricostruire un catalogo: scarica il feed indicato
 in ``AWIN_FEED_DOWNLOAD_URL``, normalizza i prodotti, usa Gemini per campi e
 titoli, poi arricchisce immagini uniche con embedding e tag visivi.

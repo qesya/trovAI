@@ -269,8 +269,10 @@ def retryable_ai_hashes(conn, hashes: Iterable[str]) -> set[str]:
     if not values:
         return set()
     rows = conn.execute(
-        "SELECT content_hash FROM feed_ai_jobs WHERE content_hash = ANY(?) AND (status = 'pending' OR (status = 'failed' AND attempts < ?))",
-        (values, MAX_AI_ATTEMPTS),
+        """SELECT content_hash FROM feed_ai_jobs WHERE content_hash = ANY(?) AND
+           (status = 'pending' OR (status = 'failed' AND attempts < ?)
+            OR (status = 'running' AND updated_at < ?))""",
+        (values, MAX_AI_ATTEMPTS, (datetime.now(timezone.utc) - STALE_AI_CLAIM).isoformat()),
     ).fetchall()
     return {row[0] for row in rows}
 
