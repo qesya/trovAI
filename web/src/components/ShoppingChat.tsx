@@ -120,11 +120,11 @@ function Disclosure() {
 export function ShoppingChat({
   merchants,
   sizes,
-  productCount,
+  offerCount,
 }: {
   merchants: string[];
   sizes: string[];
-  productCount: number;
+  offerCount: number;
 }) {
   const { messages, history, manualFilters, addMessages, pushHistory, hydrated } = useStore();
   const [input, setInput] = useState("");
@@ -199,7 +199,7 @@ export function ShoppingChat({
         {empty ? (
           <section className="flex flex-col items-center py-12 text-center sm:py-20">
             <span className="rounded-full bg-peach-soft px-3 py-1 text-xs font-medium text-wine">
-              {productCount} prodotti nel catalogo
+              {Number(offerCount).toLocaleString("it-IT")} offerte nel catalogo
             </span>
             <h1 className="mt-5 max-w-2xl font-display text-4xl font-semibold leading-tight tracking-tight text-wine sm:text-5xl">
               Descrivi cosa cerchi, <span className="italic text-wine-dark/80">come lo diresti a un amico.</span>
