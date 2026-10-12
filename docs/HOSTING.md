@@ -2,8 +2,11 @@
 
 Configurazione dello **staging**, aggiornata il 12 ottobre 2026. Il progetto
 Supabase Free `TrovAI-web` esiste e la connessione SQL e' stata verificata.
-L'inizializzazione e il collegamento ai servizi richiedono la configurazione
-dei segreti; questa guida non attesta un rilascio in produzione.
+Le 10 tabelle sono inizializzate con RLS e senza accesso per anon/authenticated.
+I segreti DATABASE_URL e AWIN_FEED_DOWNLOAD_URL sono configurati nell'ambiente
+GitHub staging. Sono state verificate entrambe le connessioni pooler (5432 e 6543).
+Il collegamento del sito a questo database resta da completare; questa guida
+non attesta un rilascio in produzione.
 
 ## Componenti
 
